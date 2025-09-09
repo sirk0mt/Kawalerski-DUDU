@@ -46,6 +46,85 @@
         .podium-3{background:linear-gradient(135deg,#cd7f32,#b87333)}
         @keyframes spin{0%{transform:rotateY(0)}50%{transform:rotateY(180deg)}100%{transform:rotateY(360deg)}}
         @media (max-width:768px){h1{font-size:1.6em}.podium{flex-direction:column;align-items:center}.podium-item{width:100%;max-width:320px}}
+        .tournament-bracket {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    align-items: center;
+}
+
+.bracket-round {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.bracket-match {
+    background: rgba(255,255,255,.04);
+    border-radius: 8px;
+    padding: 12px;
+    min-width: 200px;
+    border: 2px solid rgba(255,255,255,.1);
+}
+
+.bracket-match.final-match {
+    border-color: var(--primary);
+    box-shadow: 0 0 20px rgba(255,51,51,.3);
+}
+
+.bracket-line {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 20px;
+}
+
+.bracket-line::before {
+    content: '';
+    width: 60px;
+    height: 2px;
+    background: rgba(255,255,255,.3);
+}
+
+.bracket-connector {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    height: 30px;
+    position: relative;
+}
+
+.bracket-connector::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 25%;
+    right: 25%;
+    height: 2px;
+    background: rgba(255,255,255,.3);
+}
+
+.bracket-connector::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: rgba(255,255,255,.3);
+}
+
+@media (max-width: 768px) {
+    .bracket-round {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .bracket-match {
+        min-width: 280px;
+    }
+}
     </style>
 </head>
 <body>
@@ -230,6 +309,14 @@
             list.innerHTML = appState.drivers.map(d=>`<div class="driver-item"><span>${escapeHtml(d.name)}</span><div><button onclick="removeDriver(${d.id})" style="background:var(--danger)">Usuń</button></div></div>`).join('') || '<div class="card">Brak zawodników — dodaj minimum 4</div>';
         }
 
+        function getAverageQualiTime(driver){
+            if(driver.qualifyingTime1 == null || driver.qualifyingTime2 == null) return null;
+            return (driver.qualifyingTime1 + driver.qualifyingTime2) / 2;
+        }
+
+        function getMatchTime(driver, round){
+            return driver.matchTimes?.[round] ?? null;
+        }
         // Qualifying
         function randomizeOrder(){
             appState.drivers = shuffleArray(appState.drivers);
@@ -414,24 +501,81 @@
 
         function updateKnockoutBracket(){
             const el = document.getElementById('tournamentBracket');
-            if(!appState.knockoutBracket || !appState.knockoutBracket.length){ el.innerHTML='<div class="card">Brak drabinki</div>'; return }
-            el.innerHTML = appState.knockoutBracket.map((round,ri)=>{
-                const matchesHtml = (round.matches||[]).map((m,mi)=>{
-                    const driversHtml = (m.drivers||[]).map(driver=>{
-                        if(!driver) return '<div class="match-driver">TBD</div>';
+            if(!appState.knockoutBracket || !appState.knockoutBracket.length){ 
+                el.innerHTML='<div class="card">Brak drabinki</div>'; 
+                return;
+            }
+
+            let html = '<div class="tournament-bracket">';
+            
+            appState.knockoutBracket.forEach((round, ri) => {
+                // Nagłówek rundy
+                html += `<div class="card" style="text-align:center; margin-bottom:10px;">
+                            <h3>${escapeHtml(round.round)}</h3>
+                        </div>`;
+                
+                // Mecze w rundzie
+                html += '<div class="bracket-round">';
+                
+                (round.matches || []).forEach((match, mi) => {
+                    const matchClass = round.round === 'FINAŁ' ? 'bracket-match final-match' : 'bracket-match';
+                    
+                    html += `<div class="${matchClass}">
+                                <div class="match-header" style="font-weight:700; color:var(--primary); margin-bottom:8px; text-align:center;">
+                                    ${escapeHtml(match.name)}
+                                </div>`;
+                    
+                    // Zawodnicy w meczu
+                    (match.drivers || []).forEach(driver => {
+                        if(!driver) {
+                            html += '<div class="match-driver" style="padding:8px; background:rgba(0,0,0,.12); border-radius:6px; margin:4px 0;">TBD</div>';
+                            return;
+                        }
+                        
                         const main = findDriverById(driver.id) || driver;
                         const val = main.matchTimes?.[round.round] ?? '';
-                        return `<div class="match-driver ${m.winner===main.id? 'winner':''}" style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-radius:8px;background:rgba(0,0,0,.12)"><span>${escapeHtml(main.name)}</span><div><input type="number" class="time-input" placeholder="Czas wyścigu" step="0.01" min="0" value="${val}" onchange="updateMatchTime(${ri},${mi},${main.id},'${round.round}',this.value)">${m.winner===main.id? ' 🏆':''}</div></div>`
-                    }).join('');
-                    return `<div class="match"><div class="match-header" style="font-weight:700;color:var(--primary);margin-bottom:8px">${escapeHtml(m.name)}</div><div class="match-drivers" style="display:grid;gap:8px">${driversHtml}</div></div>`
-                }).join('');
+                        const isWinner = match.winner === main.id;
+                        const winnerStyle = isWinner ? 'background:rgba(76,175,80,.2); border:2px solid var(--success);' : 'background:rgba(0,0,0,.12);';
+                        
+                        html += `<div class="match-driver" style="display:flex; justify-content:space-between; align-items:center; padding:8px; border-radius:6px; margin:4px 0; ${winnerStyle}">
+                                    <span style="font-weight:${isWinner ? '700' : 'normal'};">
+                                        ${escapeHtml(main.name)}${isWinner ? ' 🏆' : ''}
+                                    </span>
+                                    <input type="number" class="time-input" placeholder="Czas" step="0.01" min="0" 
+                                        value="${val}" style="width:80px; margin-left:8px;"
+                                        onchange="updateMatchTime(${ri},${mi},${main.id},'${round.round}',this.value)">
+                                </div>`;
+                    });
+                    
+                    html += '</div>';
+                });
+                
+                html += '</div>';
+                
+                // Linie łączące (jeśli nie jest to ostatnia runda)
+                if(ri < appState.knockoutBracket.length - 1) {
+                    html += '<div class="bracket-connector"></div>';
+                }
+                
+                // Przycisk do następnej rundy
                 let btns = '';
-                if(round.round==='1vs1' && round.matches.filter(m=>m.drivers.length>=1).every(m=>m.winner)) btns = `<button onclick="generateQuarterFinals()" style="margin-top:12px;width:100%">Przejdź dalej →</button>`;
-                if(round.round==='Ćwierćfinały' && round.matches.filter(m=>m.drivers.length>=1).every(m=>m.winner)) btns = `<button onclick="generateSemiFinals()" style="margin-top:12px;width:100%">Przejdź dalej →</button>`;
-                if(round.round==='Półfinały' && round.matches.filter(m=>m.drivers.length>=1).every(m=>m.winner)) btns = `<button onclick="generateFinal()" style="margin-top:12px;width:100%">Przejdź dalej →</button>`;
-                if(round.round==='FINAŁ' && round.matches.filter(m=>m.drivers.length>=1).every(m=>m.winner)) btns = `<button onclick="finishTournament()" style="margin-top:12px;width:100%">Zakończ turniej →</button>`;
-                return `<div class="card"><h3>${escapeHtml(round.round)}</h3><div class="bracket">${matchesHtml}</div>${btns}</div>`
-            }).join('');
+                const hasAllWinners = round.matches.filter(m => m.drivers.length >= 1).every(m => m.winner);
+                
+                if(round.round === '1vs1' && hasAllWinners) {
+                    btns = `<button onclick="generateQuarterFinals()" style="margin:20px auto; display:block; padding:12px 24px;">Przejdź dalej →</button>`;
+                } else if(round.round === 'Ćwierćfinały' && hasAllWinners) {
+                    btns = `<button onclick="generateSemiFinals()" style="margin:20px auto; display:block; padding:12px 24px;">Przejdź dalej →</button>`;
+                } else if(round.round === 'Półfinały' && hasAllWinners) {
+                    btns = `<button onclick="generateFinal()" style="margin:20px auto; display:block; padding:12px 24px;">Przejdź dalej →</button>`;
+                } else if(round.round === 'FINAŁ' && hasAllWinners) {
+                    btns = `<button onclick="finishTournament()" style="margin:20px auto; display:block; padding:12px 24px; background:var(--primary);">Zakończ turniej 🏆</button>`;
+                }
+                
+                html += btns;
+            });
+            
+            html += '</div>';
+            el.innerHTML = html;
         }
 
         function updateMatchTime(roundIdx, matchIdx, driverId, roundName, value){
@@ -564,7 +708,7 @@
 
             if(qualified.length){
                 qualified.forEach(d => {
-                    d.avgQuali = (d.qualifyingTime1 + d.qualifyingTime2) / 2;
+                    d.avgQuali = getAverageQualiTime(d);
                 });
 
                 const fastest = qualified.reduce((a,b) => a.avgQuali < b.avgQuali ? a : b);
