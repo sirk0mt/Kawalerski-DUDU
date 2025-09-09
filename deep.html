@@ -502,7 +502,14 @@
                         if(!driver) return '<div class="match-driver">TBD</div>';
                         const main = findDriverById(driver.id) || driver;
                         const val = main.matchTimes?.[round.round] ?? '';
-                        return `<div class="match-driver ${m.winner===main.id? 'winner':''}" style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-radius:8px;background:rgba(0,0,0,.12)"><span>${escapeHtml(main.name)}</span><div><input type="number" class="time-input" placeholder="Czas wyścigu" step="0.01" min="0" value="${val}" onchange="updateMatchTime(${ri},${mi},${main.id},'${round.round}',this.value)">${m.winner===main.id? ' 🏆':''}</div></div>`
+                        return `<div class="match-driver ${m.winner===main.id? 'winner':''}" style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-radius:8px;background:rgba(0,0,0,.12)">
+                            <span>${escapeHtml(main.name)}</span>
+                            <div style="display:flex;align-items:center;gap:4px">
+                                <input type="number" class="time-input" placeholder="Czas wyścigu" step="0.01" min="0" value="${val}" onchange="updateMatchTime(${ri},${mi},${main.id},'${round.round}',this.value)">
+                                <button class="stopwatch-btn" onclick="toggleStopwatch(${main.id}, '${round.round}', 'knockout', this)">⏱️</button>
+                                ${m.winner===main.id? ' 🏆':''}
+                            </div>
+                        </div>`
                     }).join('');
                     return `<div class="match"><div class="match-header" style="font-weight:700;color:var(--primary);margin-bottom:8px">${escapeHtml(m.name)}</div><div class="match-drivers" style="display:grid;gap:8px">${driversHtml}</div></div>`
                 }).join('');
