@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kawalerka Racing Challenge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, where, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // --- Firebase Globals ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app, db, auth, userId;
+        let eventDataRef;
+        let unsubscribe;
+
+        const mainState = {
+            players: [],
+            groups: {
+                A: [],
+                B: [],
+                C: [],
+                D: []
+            },
+            currentStage: 'qualifications',
+            bonusCards: [
+                { name: 'Turbo', effect: (time) => time - 1.5, target: 'worse', icon: '🚀', image: 'https://placehold.co/150x200/52839b/white?text=Turbo' },
+                { name: 'Nitro', effect: (time) => time - 2, target: 'worse', icon: '🔥', image: 'https://placehold.co/150x200/9b2c2c/white?text=Nitro' },
+                { name: 'Czysta Linia', effect: 'do-over', target: 'do-over', icon: '🎯', image: 'https://placehold.co/150x200/6b7280/white?text=Czysta+Linia' },
+                { name: 'Lepsze Opony', effect: (time) => time * 0.98, target: 'better', icon: '🏎️', image: 'https://placehold.co/150x200/2f4477/white?text=Lepsze+Opony' },
+                { name: 'Lepsze Paliwo', effect: (time) => time - 1, target: 'worse', icon: '⛽', image: 'https://placehold.co/150x200/77512f/white?text=Lepsze+Paliwo' },
+                { name: 'Perfekcyjny Start', effect: (time) => time - 2.137, target: 'worse', icon: '🏁', image: 'https://placehold.co/150x200/60905e/white?text=Perfekcyjny+Start' },
+                { name: 'Złapałeś Kapcia', effect: (time) => time + 2, target: 'better', icon: '🛞', image: 'https://placehold.co/150x200/222222/white?text=Złapałeś+Kapcia' },
+                { name: 'Śliska Nawierzchnia', effect: (time) => time + 1.5, target: 'better', icon: '⛸️', image: 'https://placehold.co/150x200/a8c2f2/white?text=Śliska+Nawierzchnia' },
+                { name: 'Pechowy Zakręt', effect: (time) => time + 2.5, target: 'worse', icon: '💀', image: 'https://placehold.co/150x200/000000/white?text=Pechowy+Zakręt' },
+                { name: 'Zmęczenie', effect: (time) => time + 1.69, target: 'better', icon: '😴', image: 'https://placehold.co/150x200/404040/white?text=Zmęczenie' },
+                { name: 'Pechowy Driver', effect: 'worst-time', target: 'better', icon: '🤡', image: 'https://placehold.co/150x200/e6c93f/white?text=Pechowy+Driver' },
+                { name: 'Pit Stop', effect: (time) => time * 1.02, target: 'worse', icon: '🔧', image: 'https://placehold.co/150x200/323c6b/white?text=Pit+Stop' }
+            ],
+            tournamentBracket: null,
+            worstTime: null,
+            isAuthReady: false
+        };
+
+        const stageConfig = {
+            'qualifications': { title: '1. Kwalifikacje', description: 'Wpisz czasy przejazdów, aby podzielić zawodników na grupy.' },
+            'eliminations': { title: '2. Eliminacje Grupowe', description: 'Wpisz czasy i wylosuj karty bonusowe.' },
+            'elimination-podium': { title: '2.1. Podium Eliminacji', description: 'Gratulacje dla najlepszych z każdej grupy!' },
+            'bracket': { title: '3. Drabinka', description: 'Wybierz zwycięzców, aby przejść do kolejnego etapu.' },
+            'final-podium': { title: '3.1. Finałowe Podium', description: 'Zwycięzca Kawalerka Racing Challenge został wyłoniony!' }
+        };
+
+        // --- DOM Elements ---
+        const playerForm = document.getElementById('player-form');
+        const playerNameInput = document.getElementById('player-name');
+        const stage1Table = document.getElementById('stage1-table');
+        const startEliminationsBtn = document.getElementById('start-eliminations-btn');
+        const startBracketBtn = document.getElementById('start-bracket-btn');
+        const nextRoundBtn = document.getElementById('next-round-btn');
+        const stage2Container = document.getElementById('stage2-container');
+        const bracketContainer = document.getElementById('bracket-container');
+        const stageTitle = document.getElementById('stage-title');
+        const stageDescription = document.getElementById('stage-description');
+        const appIdDisplay = document.getElementById('app-id-display');
+        const userIdDisplay = document.getElementById('user-id-display');
+        const confirmModal = document.getElementById('confirm-modal');
+        const confirmOkBtn = document.getElementById('confirm-ok-btn');
+        const confirmCancelBtn = document.getElementById('confirm-cancel-btn');
+        const modalMessage = document.getElementById('modal-message');
+        const cardModal = document.getElementById('card-modal');
+        const cardNameDisplay = document.getElementById('card-name-display');
+        const cardResult = document.getElementById('card-result');
+        const cardAnimationContainer = document.getElementById('card-animation-container');
+
+        let isConfirming = false;
+
+        function showModal(message, callback) {
+            if (isConfirming) return;
+            isConfirming = true;
+            modalMessage.textContent = message;
+            confirmModal.classList.remove('hidden');
+
+            const okHandler = () => {
+                isConfirming = false;
+                confirmModal.classList.add('hidden');
+                confirmOkBtn.removeEventListener('click', okHandler);
+                confirmCancelBtn.removeEventListener('click', cancelHandler);
+                if (callback) callback(true);
+            };
+
+            const cancelHandler = () => {
+                isConfirming = false;
+                confirmModal.classList.add('hidden');
+                confirmOkBtn.removeEventListener('click', okHandler);
+                confirmCancelBtn.removeEventListener('click', cancelHandler);
+                if (callback) callback(false);
+            };
+
+            confirmOkBtn.addEventListener('click', okHandler);
+            confirmCancelBtn.addEventListener('click', cancelHandler);
+        }
+
+        // --- Firebase Init and Sync ---
+        window.onload = async () => {
+            try {
+                if (firebaseConfig.projectId) {
+                    app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+                    appIdDisplay.textContent = `ID aplikacji: ${appId}`;
+                    userIdDisplay.textContent = `Ładowanie użytkownika...`;
+                    
+                    onAuthStateChanged(auth, async (user) => {
+                        if (user) {
+                            userId = user.uid;
+                            userIdDisplay.textContent = `ID użytkownika: ${userId}`;
+                            eventDataRef = doc(db, `/artifacts/${appId}/public/data/event-data/event-info`);
+                            
+                            const docSnap = await getDoc(eventDataRef);
+                            if (docSnap.exists()) {
+                                const data = docSnap.data();
+                                Object.assign(mainState, data);
+                            } else {
+                                await setDoc(eventDataRef, mainState);
+                            }
+                            mainState.isAuthReady = true;
+                            renderUI();
+                            setupRealtimeListener();
+                        } else {
+                            if (initialAuthToken) {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                        }
+                    });
+                } else {
+                    console.error("Firebase config is missing. App will run locally without persistence.");
+                    mainState.isAuthReady = true;
+                    renderUI();
+                }
+            } catch (e) {
+                console.error("Error initializing Firebase:", e);
+                console.log("App will run locally without persistence.");
+                mainState.isAuthReady = true;
+                renderUI();
+            }
+        };
+
+        function setupRealtimeListener() {
+            if (unsubscribe) {
+                unsubscribe();
+            }
+            if (!eventDataRef) {
+                console.error('Firebase reference not available for listener.');
+                return;
+            }
+            unsubscribe = onSnapshot(eventDataRef, (doc) => {
+                if (doc.exists()) {
+                    const data = doc.data();
+                    Object.assign(mainState, data);
+                    renderUI();
+                } else {
+                    resetState();
+                    renderUI();
+                }
+            });
+        }
+
+        async function saveData() {
+            if (eventDataRef) {
+                try {
+                    const { bonusCards, ...dataToSave } = mainState;
+                    await setDoc(eventDataRef, dataToSave);
+                } catch (e) {
+                    console.error("Error saving data:", e);
+                }
+            } else {
+                console.log("Not connected to Firebase, data not saved.");
+            }
+        }
+        
+        async function resetEvent() {
+            showModal('Czy na pewno chcesz zresetować całą imprezę? To usunie wszystkie dane.', async (result) => {
+                if (result) {
+                    try {
+                        if (eventDataRef) {
+                            await deleteDoc(eventDataRef);
+                        }
+                        resetState();
+                        renderUI();
+                    } catch (e) {
+                        console.error("Error resetting event:", e);
+                        resetState();
+                        renderUI();
+                    }
+                }
+            });
+        }
+
+        function resetState() {
+            mainState.players = [];
+            mainState.groups = { A: [], B: [], C: [], D: [] };
+            mainState.currentStage = 'qualifications';
+            mainState.tournamentBracket = null;
+            mainState.worstTime = null;
+            saveData();
+        }
+
+        function createSanitizedId(name) {
+            return name.trim().toLowerCase().replace(/\s/g, '_');
+        }
+
+        // --- Stage 1: Qualifications ---
+        playerForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const playerName = playerNameInput.value.trim();
+            if (playerName && !mainState.players.find(p => p.name.toLowerCase() === playerName.toLowerCase())) {
+                const newPlayer = {
+                    id: createSanitizedId(playerName),
+                    name: playerName,
+                    qualTimes: [null, null],
+                    avgQualTime: null,
+                    group: null,
+                    elimTimes: [null, null],
+                    cardEffect: null,
+                    finalTime: null
+                };
+                mainState.players.push(newPlayer);
+                saveData();
+                playerNameInput.value = '';
+                renderUI();
+            }
+        });
+
+        function updateQualTime(element) {
+            const playerId = element.id.split('-')[3];
+            const timeIndex = parseInt(element.id.split('-')[2]);
+            const player = mainState.players.find(p => p.id === playerId);
+            if (!player) return;
+
+            const value = parseFloat(element.value);
+            player.qualTimes[timeIndex - 1] = isNaN(value) ? null : value;
+
+            if (player.qualTimes.every(t => t !== null && !isNaN(t))) {
+                player.avgQualTime = (player.qualTimes[0] + player.qualTimes[1]) / 2;
+            } else {
+                player.avgQualTime = null;
+            }
+
+            // Update the DOM for the specific player's average time
+            const avgTimeCell = document.getElementById(`avg-qual-time-${player.id}`);
+            if (avgTimeCell) {
+                avgTimeCell.textContent = player.avgQualTime !== null ? player.avgQualTime.toFixed(3) + ' s' : '-';
+            }
+            
+            saveData();
+            checkAndToggleStartButton();
+        }
+
+        function checkAndToggleStartButton() {
+             const allTimesFilled = mainState.players.length > 0 && mainState.players.every(p => p.avgQualTime !== null);
+             if (allTimesFilled) {
+                 startEliminationsBtn.classList.remove('hidden');
+             } else {
+                 startEliminationsBtn.classList.add('hidden');
+             }
+        }
+
+        function calculateQualifications() {
+            let allTimesValid = true;
+            mainState.players.forEach(p => {
+                if (p.avgQualTime === null) {
+                    allTimesValid = false;
+                }
+            });
+
+            if (!allTimesValid) {
+                showModal('Uzupełnij wszystkie czasy kwalifikacji, aby przejść dalej.');
+                return;
+            }
+
+            mainState.players.sort((a, b) => a.avgQualTime - b.avgQualTime);
+            
+            const groupSize = Math.ceil(mainState.players.length / 4);
+            mainState.groups.A = shuffle(mainState.players.slice(0, groupSize));
+            mainState.groups.B = shuffle(mainState.players.slice(groupSize, groupSize * 2));
+            mainState.groups.C = shuffle(mainState.players.slice(groupSize * 2, groupSize * 3));
+            mainState.groups.D = shuffle(mainState.players.slice(groupSize * 3));
+
+            mainState.groups.A.forEach(p => p.group = 'A');
+            mainState.groups.B.forEach(p => p.group = 'B');
+            mainState.groups.C.forEach(p => p.group = 'C');
+            mainState.groups.D.forEach(p => p.group = 'D');
+            
+            mainState.currentStage = 'eliminations';
+            saveData();
+            renderUI();
+        }
+
+        // --- Stage 2: Eliminations ---
+        function checkAllEliminationDataFilled() {
+            for (const player of mainState.players) {
+                if (player.elimTimes[0] === null || player.elimTimes[1] === null || player.cardEffect === null) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        function updateElimTime(element, timeIndex) {
+            const playerId = element.getAttribute('data-player-id');
+            const player = mainState.players.find(p => p.id === playerId);
+            if (!player) return;
+
+            const value = parseFloat(element.value);
+            player.elimTimes[timeIndex] = isNaN(value) ? null : value;
+            
+            calculateFinalTime(player);
+            
+            const finalTimeCell = document.getElementById(`final-time-${player.id}`);
+            if (finalTimeCell) {
+                finalTimeCell.textContent = player.finalTime !== null ? (player.finalTime === 'oczekiwanie' ? 'Oczekiwanie...' : player.finalTime.toFixed(3) + ' s') : '-';
+            }
+            
+            saveData();
+            checkAndToggleBracketButton();
+        }
+
+        function checkAndToggleBracketButton() {
+            if (checkAllEliminationDataFilled()) {
+                 startBracketBtn.classList.remove('hidden');
+            } else {
+                 startBracketBtn.classList.add('hidden');
+            }
+        }
+        
+        async function drawCard(playerId) {
+            const player = mainState.players.find(p => p.id === playerId);
+            if (!player) return;
+
+            if (player.cardEffect) {
+                showModal('Ten zawodnik już wylosował kartę bonusową!');
+                return;
+            }
+            
+            const drawnCard = mainState.bonusCards[Math.floor(Math.random() * mainState.bonusCards.length)];
+            
+            // Show and animate card modal
+            cardModal.classList.remove('hidden');
+            cardResult.classList.add('hidden');
+            cardAnimationContainer.classList.remove('hidden');
+            
+            // Generate and shuffle the card deck for animation
+            const cardDeck = shuffle([...mainState.bonusCards]);
+            cardAnimationContainer.innerHTML = '';
+            cardDeck.forEach((card, index) => {
+                const cardImage = document.createElement('img');
+                cardImage.src = 'https://placehold.co/150x200/52525b/white?text=Kawalerka+Racing';
+                cardImage.classList.add('card-image', 'absolute', 'transition-all', 'duration-300');
+                cardImage.style.zIndex = mainState.bonusCards.length - index;
+                cardImage.style.transform = `rotate(${Math.random() * 360}deg) translate(${Math.random() * 50 - 25}px, ${Math.random() * 50 - 25}px)`;
+                cardAnimationContainer.appendChild(cardImage);
+            });
+
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // Run shuffling animation
+            const cardElements = document.querySelectorAll('.card-image');
+            cardElements.forEach(card => {
+                card.style.transform = `rotate(${Math.random() * 360}deg) translate(${Math.random() * 50 - 25}px, ${Math.random() * 50 - 25}px) scale(0.9)`;
+                card.style.opacity = 0.8;
+            });
+            await new Promise(resolve => setTimeout(resolve, 1500));
+
+            // Stop animation and reveal card
+            cardAnimationContainer.innerHTML = '';
+            const finalCardImage = document.createElement('img');
+            finalCardImage.src = drawnCard.image;
+            finalCardImage.classList.add('w-36', 'h-auto', 'animate-final-reveal');
+            cardAnimationContainer.appendChild(finalCardImage);
+
+            player.cardEffect = drawnCard.name;
+            
+            calculateFinalTime(player);
+
+            cardAnimationContainer.classList.add('hidden');
+            cardResult.classList.remove('hidden');
+            cardNameDisplay.textContent = drawnCard.name;
+            
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Show result
+            
+            cardModal.classList.add('hidden');
+
+            const cardEffectCell = document.getElementById(`card-effect-${player.id}`);
+            if (cardEffectCell) {
+                cardEffectCell.innerHTML = `<img src="${drawnCard.image}" class="w-12 h-auto inline-block mr-2 rounded-md shadow-md"> <span class="text-sm font-semibold">${p.cardEffect}</span>`;
+                const drawButton = document.querySelector(`button[onclick="drawCard('${player.id}')"]`);
+                if(drawButton) {
+                    drawButton.textContent = "Karta wylosowana";
+                    drawButton.disabled = true;
+                }
+            }
+
+            const finalTimeCell = document.getElementById(`final-time-${player.id}`);
+            if (finalTimeCell) {
+                finalTimeCell.textContent = player.finalTime !== null ? (player.finalTime === 'oczekiwanie' ? 'Oczekiwanie...' : player.finalTime.toFixed(3) + ' s') : '-';
+            }
+            
+            saveData();
+            checkAndToggleBracketButton();
+        }
+
+        function calculateFinalTime(player) {
+            if (player.elimTimes[0] === null || player.elimTimes[1] === null || player.cardEffect === null) {
+                player.finalTime = null;
+                return;
+            }
+            
+            const time1 = player.elimTimes[0];
+            const time2 = player.elimTimes[1];
+            const avgTime = (time1 + time2) / 2;
+
+            const drawnCard = mainState.bonusCards.find(card => card.name === player.cardEffect);
+            if (!drawnCard) {
+                player.finalTime = avgTime;
+                return;
+            }
+
+            let finalTime;
+            if (drawnCard.effect === 'do-over') {
+                finalTime = Math.min(time1, time2);
+            } else if (drawnCard.effect === 'worst-time') {
+                finalTime = 'oczekiwanie';
+            } else {
+                const betterTime = Math.min(time1, time2);
+                const worseTime = Math.max(time1, time2);
+
+                if (drawnCard.target === 'better') {
+                    finalTime = drawnCard.effect(betterTime) + (worseTime - betterTime);
+                } else if (drawnCard.target === 'worse') {
+                    finalTime = (betterTime) + (drawnCard.effect(worseTime) - worseTime);
+                }
+            }
+            player.finalTime = finalTime;
+        }
+
+        function finalizeEliminationsAndGoToPodium() {
+            if (!checkAllEliminationDataFilled()) {
+                showModal('Uzupełnij wszystkie czasy eliminacji i wylosuj karty, aby przejść dalej.');
+                return;
+            }
+            
+            const allTimes = mainState.players.flatMap(p => p.elimTimes.filter(t => t !== null));
+            mainState.worstTime = Math.max(...allTimes);
+
+            mainState.players.forEach(p => {
+                if (p.cardEffect === 'Pechowy Driver') {
+                    p.finalTime = mainState.worstTime;
+                }
+            });
+            
+            for (const group in mainState.groups) {
+                mainState.groups[group].sort((a, b) => a.finalTime - b.finalTime);
+            }
+            
+            mainState.currentStage = 'elimination-podium';
+            saveData();
+            renderUI();
+        }
+
+        function confirmPodiumAndMoveToBracket() {
+            mainState.currentStage = 'bracket';
+            createBracket();
+            saveData();
+            renderUI();
+        }
+
+        function createBracket() {
+            const sortedPlayers = {};
+            for (const group in mainState.groups) {
+                sortedPlayers[group] = mainState.groups[group].sort((a, b) => a.finalTime - b.finalTime);
+            }
+
+            const getPlayer = (group, rank) => sortedPlayers[group][rank - 1];
+            
+            mainState.tournamentBracket = {
+                round: 'Ćwierćfinały',
+                matches: [
+                    { player1: getPlayer('A', 1), player2: getPlayer('B', 1), winner: null },
+                    { player1: getPlayer('C', 1), player2: getPlayer('D', 1), winner: null },
+                    { player1: getPlayer('A', 2), player2: getPlayer('B', 2), winner: null },
+                    { player1: getPlayer('C', 2), player2: getPlayer('D', 2), winner: null },
+                    { player1: getPlayer('A', 3), player2: getPlayer('B', 3), winner: null },
+                    { player1: getPlayer('C', 3), player2: getPlayer('D', 3), winner: null }
+                ],
+                nextRound: []
+            };
+        }
+
+        function advanceToNextRound() {
+            if (!mainState.tournamentBracket) return;
+
+            const winners = mainState.tournamentBracket.matches.map(m => m.winner).filter(p => p !== null);
+            if (winners.length !== mainState.tournamentBracket.matches.length) {
+                showModal('Wybierz zwycięzców wszystkich meczy, aby przejść do kolejnej rundy!');
+                return;
+            }
+
+            const currentRound = mainState.tournamentBracket.round;
+            
+            if (currentRound === 'Ćwierćfinały') {
+                const nextMatches = [
+                    { player1: winners[0], player2: winners[1], winner: null },
+                    { player1: winners[2], player2: winners[3], winner: null },
+                    { player1: winners[4], player2: winners[5], winner: null } 
+                ];
+                mainState.tournamentBracket = {
+                    round: 'Półfinały',
+                    matches: nextMatches,
+                    nextRound: []
+                };
+            } else if (currentRound === 'Półfinały') {
+                const nextMatches = [
+                    { player1: winners[0], player2: winners[1], winner: null }
+                ];
+                mainState.tournamentBracket = {
+                    round: 'Finał',
+                    matches: nextMatches,
+                    nextRound: []
+                };
+            } else if (currentRound === 'Finał') {
+                 mainState.currentStage = 'final-podium';
+                 mainState.tournamentBracket.winner = winners[0];
+                 mainState.tournamentBracket.runnerUp = mainState.tournamentBracket.matches[0].player1 === winners[0] ? mainState.tournamentBracket.matches[0].player2 : mainState.tournamentBracket.matches[0].player1;
+            }
+
+            saveData();
+            renderUI();
+        }
+
+        function setWinner(matchIndex, playerIndex) {
+            const match = mainState.tournamentBracket.matches[matchIndex];
+            if (!match) return;
+            match.winner = (playerIndex === 1) ? match.player1 : match.player2;
+            saveData();
+            renderUI();
+        }
+        
+        // --- UI Rendering ---
+        function renderUI() {
+            stageTitle.textContent = stageConfig[mainState.currentStage].title;
+            stageDescription.textContent = stageConfig[mainState.currentStage].description;
+
+            document.getElementById('qualifications-section').classList.add('hidden');
+            document.getElementById('eliminations-section').classList.add('hidden');
+            document.getElementById('elimination-podium-section').classList.add('hidden');
+            document.getElementById('bracket-section').classList.add('hidden');
+            document.getElementById('final-podium-section').classList.add('hidden');
+            startEliminationsBtn.classList.add('hidden');
+            startBracketBtn.classList.add('hidden');
+            nextRoundBtn.classList.add('hidden');
+
+            if (mainState.currentStage === 'qualifications') {
+                document.getElementById('qualifications-section').classList.remove('hidden');
+                renderQualificationsTable();
+                checkAndToggleStartButton();
+            } else if (mainState.currentStage === 'eliminations') {
+                document.getElementById('eliminations-section').classList.remove('hidden');
+                renderEliminationsTable();
+                checkAndToggleBracketButton();
+            } else if (mainState.currentStage === 'elimination-podium') {
+                document.getElementById('elimination-podium-section').classList.remove('hidden');
+                renderEliminationPodium();
+            } else if (mainState.currentStage === 'bracket') {
+                document.getElementById('bracket-section').classList.remove('hidden');
+                renderBracket();
+            } else if (mainState.currentStage === 'final-podium') {
+                 document.getElementById('final-podium-section').classList.remove('hidden');
+                 renderFinalPodium();
+            }
+        }
+
+        function renderQualificationsTable() {
+            stage1Table.innerHTML = `
+                <table class="min-w-full bg-slate-800 rounded-lg overflow-hidden shadow-lg">
+                    <thead class="bg-slate-700 text-slate-300">
+                        <tr>
+                            <th class="py-3 px-4 text-left">Zawodnik</th>
+                            <th class="py-3 px-4 text-left">Przejazd 1 (s)</th>
+                            <th class="py-3 px-4 text-left">Przejazd 2 (s)</th>
+                            <th class="py-3 px-4 text-left">Śr. Czas</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-slate-200">
+                        ${mainState.players.map(p => `
+                            <tr class="border-b border-slate-700 hover:bg-slate-700 transition-colors">
+                                <td class="py-3 px-4 font-bold">${p.name}</td>
+                                <td class="py-3 px-4">
+                                    <input type="number" step="0.01" id="qual-time-1-${p.id}" value="${p.qualTimes[0] !== null ? p.qualTimes[0] : ''}" oninput="updateQualTime(this)" class="w-24 bg-slate-900 border border-slate-600 rounded-md p-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </td>
+                                <td class="py-3 px-4">
+                                    <input type="number" step="0.01" id="qual-time-2-${p.id}" value="${p.qualTimes[1] !== null ? p.qualTimes[1] : ''}" oninput="updateQualTime(this)" class="w-24 bg-slate-900 border border-slate-600 rounded-md p-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </td>
+                                <td id="avg-qual-time-${p.id}" class="py-3 px-4">${p.avgQualTime !== null ? p.avgQualTime.toFixed(3) + ' s' : '-'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderEliminationsTable() {
+            const tableHTML = `
+                <div class="space-y-8">
+                    ${Object.entries(mainState.groups).map(([groupName, players]) => `
+                        <div class="p-6 bg-slate-800 rounded-lg shadow-xl">
+                            <h3 class="text-2xl font-bold text-slate-100 mb-4">Grupa ${groupName} - ${getGroupName(groupName)}</h3>
+                            <table class="min-w-full bg-slate-700 rounded-lg overflow-hidden">
+                                <thead class="bg-slate-600 text-slate-300">
+                                    <tr>
+                                        <th class="py-3 px-4 text-left">Zawodnik</th>
+                                        <th class="py-3 px-4 text-left">Przejazd 1 (s)</th>
+                                        <th class="py-3 px-4 text-left">Przejazd 2 (s)</th>
+                                        <th class="py-3 px-4 text-left">Karta Bonusowa</th>
+                                        <th class="py-3 px-4 text-left">Akcja</th>
+                                        <th class="py-3 px-4 text-left">Ostateczny Czas (s)</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-slate-200">
+                                    ${players.map(p => {
+                                        const card = mainState.bonusCards.find(c => c.name === p.cardEffect);
+                                        const cardDisplay = card ? `<img src="${card.image}" class="w-12 h-auto inline-block mr-2 rounded-md shadow-md"> <span class="text-sm font-semibold">${p.cardEffect}</span>` : '-';
+                                        return `
+                                            <tr class="border-b border-slate-600 hover:bg-slate-600 transition-colors">
+                                                <td class="py-3 px-4 font-bold">${p.name}</td>
+                                                <td class="py-3 px-4">
+                                                    <input type="number" step="0.01" data-player-id="${p.id}" data-time-index="0" value="${p.elimTimes[0] !== null ? p.elimTimes[0] : ''}" oninput="updateElimTime(this, 0)" class="w-24 bg-slate-900 border border-slate-600 rounded-md p-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                                </td>
+                                                <td class="py-3 px-4">
+                                                    <input type="number" step="0.01" data-player-id="${p.id}" data-time-index="1" value="${p.elimTimes[1] !== null ? p.elimTimes[1] : ''}" oninput="updateElimTime(this, 1)" class="w-24 bg-slate-900 border border-slate-600 rounded-md p-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                                </td>
+                                                <td id="card-effect-${p.id}" class="py-3 px-4">${cardDisplay}</td>
+                                                <td class="py-3 px-4">
+                                                    <button onclick="drawCard('${p.id}')" class="bg-yellow-500 hover:bg-yellow-600 text-slate-900 font-bold py-1 px-3 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed" ${p.cardEffect ? 'disabled' : ''}>
+                                                        ${p.cardEffect ? 'Karta wylosowana' : 'Losuj Kartę'}
+                                                    </button>
+                                                </td>
+                                                <td id="final-time-${p.id}" class="py-3 px-4 font-semibold">${p.finalTime !== null ? (p.finalTime === 'oczekiwanie' ? 'Oczekiwanie...' : p.finalTime.toFixed(3) + ' s') : '-'}</td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            stage2Container.innerHTML = tableHTML;
+        }
+        
+        function renderEliminationPodium() {
+            const podiumHTML = `
+                <div class="space-y-8">
+                    ${Object.entries(mainState.groups).map(([groupName, players]) => {
+                        const top3 = players.slice(0, 3);
+                        return `
+                            <div class="p-6 bg-slate-800 rounded-lg shadow-xl">
+                                <h3 class="text-2xl font-bold text-slate-100 mb-4 text-center">Podium Grupy ${groupName} - ${getGroupName(groupName)}</h3>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+                                    ${top3.map((p, index) => {
+                                        const position = index + 1;
+                                        const color = position === 1 ? 'text-yellow-400' : position === 2 ? 'text-slate-400' : 'text-amber-700';
+                                        return `
+                                            <div class="bg-slate-700 p-4 rounded-lg shadow-md">
+                                                <p class="text-4xl font-extrabold ${color} mb-2">${position}.</p>
+                                                <p class="text-xl font-bold">${p.name}</p>
+                                                <p class="text-lg font-semibold text-slate-300">${p.finalTime.toFixed(3)} s</p>
+                                                <p class="text-sm italic text-slate-400">Karta: ${p.cardEffect}</p>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                <div class="flex justify-center mt-8">
+                    <button onclick="confirmPodiumAndMoveToBracket()" class="px-8 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-full font-bold text-lg shadow-lg transition-colors transform hover:scale-105">
+                        Przejdź do Drabinki
+                    </button>
+                </div>
+            `;
+            document.getElementById('elimination-podium-section').innerHTML = podiumHTML;
+        }
+
+
+        function renderBracket() {
+            if (!mainState.tournamentBracket || mainState.tournamentBracket.matches.length === 0) {
+                bracketContainer.innerHTML = `<p class="text-xl text-slate-400 text-center">Drabinka turniejowa jest pusta. Upewnij się, że ukończono poprzednie etapy.</p>`;
+                nextRoundBtn.classList.add('hidden');
+                return;
+            }
+
+            nextRoundBtn.classList.remove('hidden');
+
+            const bracketHTML = `
+                <div class="space-y-8">
+                    <h3 class="text-3xl font-bold text-slate-100 text-center">${mainState.tournamentBracket.round}</h3>
+                    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        ${mainState.tournamentBracket.matches.map((match, index) => `
+                            <div class="p-6 bg-slate-800 rounded-lg shadow-xl">
+                                <div class="flex flex-col items-center space-y-4">
+                                    <div class="w-full flex justify-between items-center bg-slate-900 p-4 rounded-lg">
+                                        <button onclick="setWinner(${index}, 1)" class="w-1/2 p-2 rounded-l-lg ${match.winner && match.winner.id === match.player1.id ? 'bg-blue-600' : 'bg-slate-700 hover:bg-slate-600'} text-slate-200 font-bold transition-colors text-center">
+                                            ${match.player1 ? match.player1.name : 'TBD'}
+                                        </button>
+                                        <span class="text-slate-400 mx-2 font-bold">vs</span>
+                                        <button onclick="setWinner(${index}, 2)" class="w-1/2 p-2 rounded-r-lg ${match.winner && match.winner.id === match.player2.id ? 'bg-blue-600' : 'bg-slate-700 hover:bg-slate-600'} text-slate-200 font-bold transition-colors text-center">
+                                            ${match.player2 ? match.player2.name : 'TBD'}
+                                        </button>
+                                    </div>
+                                    <div class="text-slate-400 font-semibold">
+                                        Zwycięzca: ${match.winner ? match.winner.name : 'Jeszcze nie wybrano'}
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            bracketContainer.innerHTML = bracketHTML;
+        }
+
+        function renderFinalPodium() {
+            const winner = mainState.tournamentBracket.winner;
+            const runnerUp = mainState.tournamentBracket.runnerUp;
+            const finalPodiumHTML = `
+                <div class="p-8 bg-slate-800 rounded-lg shadow-xl text-center">
+                    <h2 class="text-4xl font-extrabold text-blue-500 mb-6">Finałowe Podium</h2>
+                    <div class="flex flex-col items-center space-y-8">
+                        <!-- Winner -->
+                        <div class="bg-gradient-to-t from-slate-700 to-slate-600 p-6 rounded-lg shadow-lg transform scale-110">
+                            <p class="text-6xl font-black text-yellow-400 mb-2">1. Miejsce</p>
+                            <p class="text-3xl font-bold">${winner.name}</p>
+                            <p class="text-lg italic text-slate-300">Zwycięzca Kawalerka Racing Challenge!</p>
+                        </div>
+                        <!-- Runner-up -->
+                        <div class="bg-slate-700 p-4 rounded-lg shadow-md">
+                            <p class="text-3xl font-black text-slate-400 mb-1">2. Miejsce</p>
+                            <p class="text-xl font-bold">${runnerUp.name}</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('final-podium-section').innerHTML = finalPodiumHTML;
+        }
+
+        function getGroupName(group) {
+            switch(group) {
+                case 'A': return 'Zapierdalacze';
+                case 'B': return 'Średni czyli Super';
+                case 'C': return 'Niedzielni Kierowcy';
+                case 'D': return 'Zaślimaczeni';
+                default: return 'Nieznana Grupa';
+            }
+        }
+        
+        function shuffle(array) {
+            let currentIndex = array.length, randomIndex;
+            while (currentIndex !== 0) {
+                randomIndex = Math.floor(Math.random() * currentIndex);
+                currentIndex--;
+                [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+            }
+            return array;
+        }
+
+        // Expose functions to the global scope for onclick attributes
+        window.drawCard = drawCard;
+        window.setWinner = setWinner;
+        window.resetEvent = resetEvent;
+        window.calculateQualifications = calculateQualifications;
+        window.finalizeEliminationsAndGoToPodium = finalizeEliminationsAndGoToPodium;
+        window.confirmPodiumAndMoveToBracket = confirmPodiumAndMoveToBracket;
+        window.advanceToNextRound = advanceToNextRound;
+        window.updateQualTime = updateQualTime;
+        window.updateElimTime = updateElimTime;
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark slate background */
+            color: #e2e8f0; /* Light text */
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+        .card-image {
+            width: 100px;
+            height: 150px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s ease-in-out;
+        }
+        @keyframes shuffle {
+            0% {
+                transform: rotate(0deg) translate(0, 0);
+            }
+            25% {
+                transform: rotate(10deg) translate(-10px, -10px);
+            }
+            50% {
+                transform: rotate(-10deg) translate(10px, 10px);
+            }
+            75% {
+                transform: rotate(5deg) translate(-5px, 5px);
+            }
+            100% {
+                transform: rotate(0deg) translate(0, 0);
+            }
+        }
+        @keyframes final-reveal {
+            0% {
+                transform: scale(0.5) rotateY(180deg);
+                opacity: 0;
+            }
+            100% {
+                transform: scale(1) rotateY(0deg);
+                opacity: 1;
+            }
+        }
+        .animate-final-reveal {
+            animation: final-reveal 1s cubic-bezier(0.68, -0.55, 0.27, 1.55) forwards;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-200 antialiased">
+
+    <!-- Confirmation Modal -->
+    <div id="confirm-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
+        <div class="bg-slate-800 p-8 rounded-lg shadow-lg max-w-sm w-full border-2 border-red-600">
+            <p id="modal-message" class="text-center text-xl font-semibold mb-6">Are you sure?</p>
+            <div class="flex justify-end space-x-4">
+                <button id="confirm-cancel-btn" class="px-6 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-full font-bold transition-colors">Anuluj</button>
+                <button id="confirm-ok-btn" class="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-full font-bold transition-colors">Tak, zresetuj</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card Draw Modal -->
+    <div id="card-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
+        <div class="bg-slate-800 p-8 rounded-lg shadow-lg max-w-sm w-full text-center">
+            <div id="card-animation-container" class="relative w-40 h-60 mx-auto mb-6 flex items-center justify-center"></div>
+            <div id="card-result" class="hidden">
+                <p class="text-2xl font-bold text-white mb-4">Wylosowano kartę:</p>
+                <img id="card-image-display" src="" alt="Wylosowana Karta" class="w-36 h-auto mx-auto rounded-lg mb-4">
+                <p id="card-name-display" class="text-4xl font-extrabold text-blue-400"></p>
+            </div>
+        </div>
+    </div>
+
+    <div class="container flex flex-col min-h-screen">
+        <!-- Header -->
+        <header class="text-center py-8">
+            <h1 class="text-4xl font-extrabold text-blue-500 tracking-wider">KAWALERKA RACING CHALLENGE</h1>
+            <p id="stage-title" class="text-xl font-semibold mt-2 text-slate-300"></p>
+            <p id="stage-description" class="text-sm italic text-slate-400 mt-1"></p>
+            <div class="mt-4 text-xs text-slate-500 flex justify-center space-x-4">
+                <span id="app-id-display"></span>
+                <span id="user-id-display"></span>
+            </div>
+        </header>
+
+        <main class="flex-grow flex flex-col items-center space-y-8">
+            <!-- Stage 1: Qualifications Section -->
+            <section id="qualifications-section" class="w-full">
+                <div class="bg-slate-800 p-6 rounded-lg shadow-xl mb-6 flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0 sm:space-x-4">
+                    <form id="player-form" class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 w-full">
+                        <input type="text" id="player-name" placeholder="Imię zawodnika" class="flex-grow px-4 py-2 bg-slate-900 border border-slate-700 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg">
+                        <button type="submit" class="w-full sm:w-auto px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold shadow-lg transition-colors">Dodaj Zawodnika</button>
+                    </form>
+                </div>
+                <div id="stage1-table" class="bg-slate-800 p-6 rounded-lg shadow-xl overflow-x-auto"></div>
+                <div id="stage1-input-container"></div>
+            </section>
+            
+            <!-- Stage 2: Eliminations Section -->
+            <section id="eliminations-section" class="w-full">
+                <div id="stage2-container"></div>
+            </section>
+            
+            <!-- Stage 2.1: Elimination Podium Section -->
+            <section id="elimination-podium-section" class="w-full">
+                <!-- Content will be rendered by JS -->
+            </section>
+
+            <!-- Bracket Section -->
+            <section id="bracket-section" class="w-full">
+                <div id="bracket-container"></div>
+            </section>
+
+            <!-- Final Podium Section -->
+            <section id="final-podium-section" class="w-full">
+                <!-- Content will be rendered by JS -->
+            </section>
+        </main>
+
+        <!-- Action Buttons -->
+        <div class="py-8 flex justify-center space-x-4">
+            <button id="start-eliminations-btn" onclick="calculateQualifications()" class="hidden px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-full font-bold text-lg shadow-lg transition-colors transform hover:scale-105">
+                Rozpocznij Eliminacje
+            </button>
+            <button id="start-bracket-btn" onclick="finalizeEliminationsAndGoToPodium()" class="hidden px-8 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-full font-bold text-lg shadow-lg transition-colors transform hover:scale-105">
+                Przejdź do Drabinki
+            </button>
+            <button id="next-round-btn" onclick="advanceToNextRound()" class="hidden px-8 py-3 bg-yellow-500 hover:bg-yellow-600 text-slate-900 rounded-full font-bold text-lg shadow-lg transition-colors transform hover:scale-105">
+                Następna Runda
+            </button>
+            <button id="reset-btn" onclick="resetEvent()" class="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-full font-bold shadow-lg transition-colors">
+                Zresetuj Imprezę
+            </button>
+        </div>
+    </div>
+</body>
+</html>
