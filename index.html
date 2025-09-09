@@ -545,14 +545,42 @@
         }
 
         function updateStats(){
-            const stats = document.getElementById('tournamentStats');
-            const allTimes = appState.drivers.filter(d=>d.avgTime!=null).map(d=>d.avgTime);
-            if(allTimes.length===0){ stats.innerHTML = '<div class="card">Brak danych kwalifikacji</div>'; return }
-            const fastest = Math.min(...allTimes); const slowest = Math.max(...allTimes); const avg = allTimes.reduce((a,b)=>a+b,0)/allTimes.length;
-            stats.innerHTML = `<div class="stat-card"><div class="stat-label">Liczba kierowców</div><div class="stat-value">${appState.drivers.length}</div></div><div class="stat-card"><div class="stat-label">Najszybszy czas kwalifikacji</div><div class="stat-value">${fastest.toFixed(2)}s</div></div><div class="stat-card"><div class="stat-label">Najwolniejszy czas kwalifikacji</div><div class="stat-value">${slowest.toFixed(2)}s</div></div><div class="stat-card"><div class="stat-label">Średni czas kwalifikacji</div><div class="stat-value">${avg.toFixed(2)}s</div></div>`;
-            // Final podium
-            const fp = document.getElementById('finalPodium'); const fw = document.getElementById('finalWinner');
-            if(appState.finalStandings && appState.finalStandings.length){
+            const statDiv = document.getElementById('tournamentStats');
+            if(!statDiv) return;
+
+            // Statystyki ogólne – liczba zawodników, ukończone kwalifikacje itp.
+            const totalDrivers = appState.drivers.length;
+            const qualifiedDrivers = appState.drivers.filter(d=>d.qualifyingTime1!=null && d.qualifyingTime2!=null).length;
+            statDiv.innerHTML = `
+                <div class="card">
+                    <h3>📋 Podsumowanie</h3>
+                    <p>Łączna liczba zawodników: <strong>${totalDrivers}</strong></p>
+                    <p>Ukończone kwalifikacje: <strong>${qualifiedDrivers}</strong></p>
+                </div>
+            `;
+
+            // 🔎 Najszybszy i najwolniejszy w kwalifikacjach
+            const qualified = appState.drivers.filter(d => d.qualifyingTime1 != null && d.qualifyingTime2 != null);
+
+            if(qualified.length){
+                qualified.forEach(d => {
+                    d.avgQuali = (d.qualifyingTime1 + d.qualifyingTime2) / 2;
+                });
+
+                const fastest = qualified.reduce((a,b) => a.avgQuali < b.avgQuali ? a : b);
+                const slowest = qualified.reduce((a,b) => a.avgQuali > b.avgQuali ? a : b);
+
+                statDiv.innerHTML += `
+                <div class="card">
+                    <h3>⏱️ Ciekawostki z kwalifikacji</h3>
+                    <p><strong>Najszybszy:</strong> ${escapeHtml(fastest.name)} (${fastest.avgQuali.toFixed(2)} s)</p>
+                    <p><strong>Najwolniejszy:</strong> ${escapeHtml(slowest.name)} (${slowest.avgQuali.toFixed(2)} s)</p>
+                </div>`;
+            }
+
+            // 🏆 Podium końcowe
+            const fp = document.getElementById('finalPodium');
+            if(fp && appState.finalStandings && appState.finalStandings.length){
                 const podiumByPos = {1:[],2:[],3:[]};
                 appState.finalStandings.forEach(s=> podiumByPos[s.position].push(s.driver));
 
@@ -562,8 +590,7 @@
                 ${podiumByPos[2].map(d=>`<div class="podium-item podium-2"><div style="font-size:1.6em">🥈</div><div style="font-weight:700;font-size:1.05em">${escapeHtml(d.name)}</div><div>Grupa ${escapeHtml(d.group||'—')}</div></div>`).join('')}
                 ${podiumByPos[3].map(d=>`<div class="podium-item podium-3"><div style="font-size:1.6em">🥉</div><div style="font-weight:700;font-size:1.05em">${escapeHtml(d.name)}</div><div>Grupa ${escapeHtml(d.group||'—')}</div></div>`).join('')}
                 </div></div>`;
-                const champ = appState.finalStandings[0].driver; fw.innerHTML = `<div class="card" style="text-align:center;background:linear-gradient(135deg,var(--group-a),var(--warning));margin-top:10px"><div style="font-size:2.2em">🏆</div><h2 style="margin:8px 0">ZWYCIĘZCA TURNIEJU</h2><h3 style="font-size:1.6em">${escapeHtml(champ.name)}</h3><p>Grupa ${escapeHtml(champ.group||'—')}</p></div>`;
-            } else { fp.innerHTML=''; fw.innerHTML=''; }
+            }
         }
 
         // Utility functions
