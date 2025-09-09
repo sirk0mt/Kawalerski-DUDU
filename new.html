@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🏁 Turniej Wyścigowy - Wieczór Kawalerski</title>
+    <meta name="description" content="Aplikacja do zarządzania turniejem wyścigowym - kwalifikacje, eliminacje grupowe, losowanie kart bonusów i faza pucharowa. Gotowe do publikacji jako GitHub Page.">
+    <style>
+        /* (Zachowana większość stylów z oryginału, lekko uproszczone) */
+        *{box-sizing:border-box;margin:0;padding:0}
+        :root{
+            --primary:#ff3333;--secondary:#333;--success:#4caf50;--warning:#ff9800;--danger:#f44336;
+            --group-a:#ffd700;--group-b:#c0c0c0;--group-c:#cd7f32;--group-d:#8b4513
+        }
+        body{font-family:Segoe UI, Tahoma, Geneva, Verdana, sans-serif;background:linear-gradient(135deg,#1e1e1e,#2d2d2d);color:#fff;min-height:100vh;padding:20px}
+        .container{max-width:1100px;margin:0 auto}
+        h1{text-align:center;font-size:2rem;margin-bottom:8px;background:linear-gradient(45deg,var(--primary),#ff6666);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+        .subtitle{text-align:center;color:#aaa;margin-bottom:20px}
+        .tabs{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:20px}
+        .tab{padding:10px 18px;background:var(--secondary);border-radius:30px;border:none;color:#fff;cursor:pointer}
+        .tab.active{background:var(--primary)}
+        .card{background:rgba(255,255,255,0.03);padding:18px;border-radius:12px;margin-bottom:18px;border:1px solid rgba(255,255,255,0.04)}
+        .input-group{display:flex;gap:10px;flex-wrap:wrap}
+        input,select,button{font-size:1rem}
+        input,select{padding:10px;border-radius:8px;border:2px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);color:#fff;min-width:180px}
+        button{padding:10px 16px;border-radius:8px;border:0;background:var(--primary);color:#fff;cursor:pointer}
+        .drivers-list{display:grid;gap:8px;margin-top:12px}
+        .driver-item{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:8px;background:rgba(255,255,255,0.02)}
+        .time-input{width:110px}
+        .group-badge{padding:6px 12px;border-radius:20px;font-weight:bold}
+        .group-A{background:var(--group-a);color:#000}
+        .group-B{background:var(--group-b);color:#000}
+        .group-C{background:var(--group-c)}
+        .group-D{background:var(--group-d)}
+        .bonus-card{padding:14px;border-radius:12px;text-align:center}
+        .bracket{display:grid;gap:14px;margin-top:14px}
+        .match{padding:12px;border-radius:10px;background:rgba(255,255,255,0.02)}
+        .match-driver{display:flex;justify-content:space-between;align-items:center;padding:8px;background:rgba(0,0,0,0.25);border-radius:8px}
+        .stat-card{padding:12px;border-radius:10px;background:linear-gradient(135deg,rgba(255,255,255,0.03),rgba(255,255,255,0.02));text-align:center}
+        .stat-value{font-size:1.6rem;color:var(--primary);font-weight:700}
+        .floating-save{position:fixed;right:24px;bottom:24px;padding:10px 18px;border-radius:40px;background:var(--success);display:none}
+
+        /* Modal for card draw */
+        .modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:50;visibility:hidden;opacity:0;transition:opacity .2s ease,visibility .2s}
+        .modal.show{visibility:visible;opacity:1}
+        .modal-card{background:#111;padding:20px;border-radius:12px;min-width:280px;text-align:center;border:2px solid rgba(255,255,255,0.06)}
+        .card-graphic{font-size:48px;margin-bottom:8px}
+
+        @media(max-width:700px){.time-input{width:95px}}    
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏁 Turniej Wyścigowy</h1>
+        <p class="subtitle">System zarządzania zawodami — gotowe do publikacji jako GitHub Page</p>
+
+        <div class="tabs" id="tabsRow">
+            <button class="tab active" data-tab="setup" onclick="showTab('setup')">📝 Uczestnicy</button>
+            <button class="tab" data-tab="qualifying" onclick="showTab('qualifying')">⏱️ Kwalifikacje</button>
+            <button class="tab" data-tab="groups" onclick="showTab('groups')">🎯 Eliminacje</button>
+            <button class="tab" data-tab="knockout" onclick="showTab('knockout')">🏆 Faza Pucharowa</button>
+            <button class="tab" data-tab="stats" onclick="showTab('stats')">📊 Statystyki</button>
+        </div>
+
+        <!-- Setup -->
+        <div id="setup" class="tab-content">
+            <div class="card">
+                <h2>Dodaj uczestników</h2>
+                <div class="input-group">
+                    <input id="driverName" placeholder="Imię kierowcy" onkeypress="if(event.key==='Enter') addDriver()">
+                    <button onclick="addDriver()">Dodaj kierowcę</button>
+                </div>
+                <div id="driversList" class="drivers-list"></div>
+                <button onclick="startQualifying()" style="margin-top:12px;width:100%">Rozpocznij kwalifikacje →</button>
+            </div>
+        </div>
+
+        <!-- Qualifying -->
+        <div id="qualifying" class="tab-content" style="display:none">
+            <div class="card">
+                <h2>Kwalifikacje - Pomiar czasów</h2>
+                <button onclick="randomizeOrder()" style="margin-bottom:12px">🎲 Losuj kolejność</button>
+                <div id="qualifyingList"></div>
+                <button onclick="finishQualifying()" style="margin-top:12px;width:100%">Zakończ kwalifikacje i podziel na grupy →</button>
+            </div>
+        </div>
+
+        <!-- Groups -->
+        <div id="groups" class="tab-content" style="display:none">
+            <div class="card">
+                <h2>Eliminacje grupowe</h2>
+                <div id="groupsDisplay"></div>
+                <button onclick="startKnockout()" style="margin-top:12px;width:100%">Przejdź do fazy pucharowej →</button>
+            </div>
+        </div>
+
+        <!-- Knockout -->
+        <div id="knockout" class="tab-content" style="display:none">
+            <div class="card">
+                <h2>Faza Pucharowa</h2>
+                <div id="tournamentBracket"></div>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div id="stats" class="tab-content" style="display:none">
+            <div class="card">
+                <h2>Statystyki turnieju</h2>
+                <div id="tournamentStats" class="stats"></div>
+                <div id="finalWinner"></div>
+            </div>
+        </div>
+
+        <button id="resetBtn" style="background:var(--danger);margin-top:10px">🔄 Reset turnieju</button>
+
+    </div>
+
+    <div id="saveNotification" class="floating-save">✅ Zapisano automatycznie</div>
+
+    <!-- Modal for card draw -->
+    <div id="cardModal" class="modal" onclick="closeModal(event)">
+        <div class="modal-card" id="modalCard" onclick="event.stopPropagation()">
+            <div class="card-graphic" id="modalGraphic">🎴</div>
+            <div id="modalTitle" style="font-weight:700;margin-bottom:6px">Karta</div>
+            <div id="modalDesc" style="color:#ccc;margin-bottom:12px">Opis</div>
+            <button onclick="closeModal()">OK</button>
+        </div>
+    </div>
+
+    <script>
+    // ========================
+    // Stan aplikacji (uprzątnięty i bezpośrednio serializowalny)
+    // ========================
+    let appState = {
+        drivers: [],
+        stage: 'setup',
+        groups: { A: [], B: [], C: [], D: [] },
+        knockoutBracket: [],
+        bonusCards: [
+            { id: 'turbo', name: 'Turbo 🚀', effect: -1.5, target: 'worse', type: 'positive', graphic: '🚀' },
+            { id: 'nitro', name: 'Nitro 💨', effect: -2, target: 'worse', type: 'positive', graphic: '💨' },
+            { id: 'czysta', name: 'Czysta linia 🎯', effect: 'repeat', type: 'positive', graphic: '🎯' },
+            { id: 'opony', name: 'Lepsze opony 🛞', effect: 0.98, target: 'better_multiply', type: 'positive', graphic: '🛞' },
+            { id: 'paliwo', name: 'Lepsze paliwo ⛽', effect: -1, target: 'worse', type: 'positive', graphic: '⛽' },
+            { id: 'start', name: 'Perfekcyjny start 🏁', effect: -2.137, target: 'worse', type: 'positive', graphic: '🏁' },
+            { id: 'kapec', name: 'Złapałeś kapcia 👟', effect: 2, target: 'better', type: 'negative', graphic: '👟' },
+            { id: 'sliska', name: 'Śliska nawierzchnia 🌧️', effect: 1.5, target: 'better', type: 'negative', graphic: '🌧️' },
+            { id: 'zakret', name: 'Pechowy zakręt 🔄', effect: 2.5, target: 'worse', type: 'negative', graphic: '🔄' },
+            { id: 'zmeczenie', name: 'Zmęczenie 😴', effect: 1.69, target: 'better', type: 'negative', graphic: '😴' },
+            { id: 'pechowy_driver', name: 'Pechowy driver 💀', effect: 'worst', type: 'negative', graphic: '💀' },
+            { id: 'pit', name: 'Pit stop 🔧', effect: 1.02, target: 'worse_multiply', type: 'negative', graphic: '🔧' }
+        ]
+    };
+
+    // ===== Helpery =====
+    function uid(prefix='d') { return prefix + '_' + Math.random().toString(36).slice(2,9); }
+    function isNumber(v){return typeof v==='number' && Number.isFinite(v)}
+
+    // ===== Persistencja =====
+    function loadState(){
+        try{
+            const raw = localStorage.getItem('racingTournament');
+            if(raw){
+                const parsed = JSON.parse(raw);
+                // Simple migration: keep only expected keys
+                appState = Object.assign(appState, parsed);
+            }
+        }catch(e){console.warn('Nie udało się wczytać stanu', e)}
+        updateAllDisplays();
+    }
+    function saveState(){
+        try{ localStorage.setItem('racingTournament', JSON.stringify(appState)); showSaveNotification(); }catch(e){console.warn(e)}
+    }
+    function showSaveNotification(){const n=document.getElementById('saveNotification');n.style.display='block';setTimeout(()=>n.style.display='none',1500)}
+
+    // ===== Tabs =====
+    function showTab(tabName){
+        document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===tabName));
+        document.querySelectorAll('.tab-content').forEach(c=>c.style.display = (c.id===tabName? 'block':'none'));
+        appState.stage = tabName;
+        updateAllDisplays();
+        saveState();
+    }
+
+    // ===== Drivers =====
+    function addDriver(){
+        const input = document.getElementById('driverName');
+        const name = input.value.trim();
+        if(!name) return alert('Podaj imię kierowcy');
+        if(appState.drivers.some(d=>d.name.toLowerCase()===name.toLowerCase())){ input.value=''; return alert('Taki kierowca już istnieje'); }
+        const d = { id: uid('drv'), name, qualifyingTime1:null, qualifyingTime2:null, avgTime:null, group:null, groupTime1:null, groupTime2:null, bonusCardId:null, finalGroupTime:null, matchTime:null };
+        appState.drivers.push(d);
+        input.value=''; updateDriversList(); saveState();
+    }
+    function removeDriver(id){ if(!confirm('Usuń kierowcę?')) return; appState.drivers = appState.drivers.filter(d=>d.id!==id); updateAllDisplays(); saveState(); }
+    function updateDriversList(){
+        const list = document.getElementById('driversList');
+        list.innerHTML = appState.drivers.map(d=>`
+            <div class="driver-item">
+                <span>${escapeHtml(d.name)}</span>
+                <div>
+                    <button onclick="removeDriver('${d.id}')" style="background:var(--danger)">Usuń</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // ===== Qualifying =====
+    function startQualifying(){
+        if(appState.drivers.length < 4) return alert('Potrzebujesz minimum 4 kierowców!');
+        showTab('qualifying');
+    }
+    function randomizeOrder(){
+        appState.drivers.sort(()=>Math.random()-0.5); updateQualifyingList(); saveState();
+    }
+    function updateQualifyingList(){
+        const list = document.getElementById('qualifyingList');
+        list.innerHTML = appState.drivers.map((driver,idx)=>`
+            <div class="driver-item">
+                <span>${idx+1}. ${escapeHtml(driver.name)}</span>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <input type="number" class="time-input" placeholder="Czas 1" step="0.01" value="${isNumber(driver.qualifyingTime1)?driver.qualifyingTime1:''}" onchange="updateQualifyingTime('${driver.id}',1,this.value)">
+                    <input type="number" class="time-input" placeholder="Czas 2" step="0.01" value="${isNumber(driver.qualifyingTime2)?driver.qualifyingTime2:''}" onchange="updateQualifyingTime('${driver.id}',2,this.value)">
+                    <span style="min-width:120px;text-align:right">${isNumber(driver.avgTime)?`Średnia: ${driver.avgTime.toFixed(2)}s`:''}</span>
+                </div>
+            </div>
+        `).join('');
+    }
+    function updateQualifyingTime(id, run, value){
+        const d = appState.drivers.find(x=>x.id===id); if(!d) return;
+        const v = value==='' ? null : parseFloat(value);
+        if(run===1) d.qualifyingTime1 = Number.isFinite(v)?v:null;
+        if(run===2) d.qualifyingTime2 = Number.isFinite(v)?v:null;
+        if(Number.isFinite(d.qualifyingTime1) && Number.isFinite(d.qualifyingTime2)) d.avgTime = (d.qualifyingTime1 + d.qualifyingTime2)/2;
+        else d.avgTime = null;
+        updateQualifyingList(); saveState();
+    }
+
+    function finishQualifying(){
+        const missing = appState.drivers.filter(d=>!Number.isFinite(d.avgTime));
+        if(missing.length) return alert('Nie wszyscy kierowcy mają wpisane czasy!');
+        const sorted = [...appState.drivers].sort((a,b)=>a.avgTime - b.avgTime);
+        const groupSize = Math.ceil(sorted.length/4);
+        appState.groups.A = sorted.slice(0,groupSize);
+        appState.groups.B = sorted.slice(groupSize,groupSize*2);
+        appState.groups.C = sorted.slice(groupSize*2,groupSize*3);
+        appState.groups.D = sorted.slice(groupSize*3);
+        // ustaw grupę dla referencji
+        Object.keys(appState.groups).forEach(g=>appState.groups[g].forEach(d=>{ d.group = g; }));
+        // sync drivers array to keep objects same references
+        syncDriversFromGroups();
+        showTab('groups'); updateGroupsDisplay(); saveState();
+        // pokaż podium każdej grupy
+        setTimeout(()=>showGroupPodiums(),300);
+    }
+
+    function syncDriversFromGroups(){
+        // ensuring driver objects in appState.drivers point to the same objects used in groups
+        const map = {};
+        appState.drivers.forEach(d=>map[d.id]=d);
+        Object.keys(appState.groups).forEach(g=>{
+            appState.groups[g] = appState.groups[g].map(d=>map[d.id]||d);
+        });
+    }
+
+    // ===== Groups =====
+    function updateGroupsDisplay(){
+        const display = document.getElementById('groupsDisplay');
+        display.innerHTML = Object.keys(appState.groups).map(group=>{
+            const name = {A:'Zapierdalacze',B:'Średni (Super)',C:'Niedzielni kierowcy',D:'Zaślimaczeni'}[group];
+            return `
+                <div class="card">
+                    <h3>Grupa ${group} - ${name} <span class="group-badge group-${group}">${group}</span></h3>
+                    ${appState.groups[group].map(driver=>`
+                        <div class="driver-item" style="margin:8px 0;flex-direction:column;align-items:flex-start">
+                            <div style="width:100%;display:flex;justify-content:space-between;align-items:center">
+                                <div>${escapeHtml(driver.name)} (Śr. kwal: ${isNumber(driver.avgTime)?driver.avgTime.toFixed(2)+'s':'-'})</div>
+                                <div style="display:flex;gap:8px;align-items:center">
+                                    <input type="number" class="time-input" placeholder="Czas 1" step="0.01" value="${isNumber(driver.groupTime1)?driver.groupTime1:''}" onchange="updateGroupTime('${driver.id}',1,this.value)">
+                                    <input type="number" class="time-input" placeholder="Czas 2" step="0.01" value="${isNumber(driver.groupTime2)?driver.groupTime2:''}" onchange="updateGroupTime('${driver.id}',2,this.value)">
+                                    <button onclick="drawBonusCard('${driver.id}')" ${driver.bonusCardId? 'disabled':''} style="background:var(--warning)">${driver.bonusCardId? getCardById(driver.bonusCardId).name : '🎰 Losuj kartę'}</button>
+                                </div>
+                            </div>
+                            ${isNumber(driver.finalGroupTime)?`<div style="margin-top:8px;background:rgba(0,0,0,0.25);padding:8px;border-radius:8px">Czas po bonusie: <strong>${driver.finalGroupTime.toFixed(2)}s</strong></div>`:''}
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }).join('');
+    }
+
+    function updateGroupTime(id, run, value){
+        const d = appState.drivers.find(x=>x.id===id); if(!d) return;
+        const v = value===''?null:parseFloat(value);
+        if(run===1) d.groupTime1 = Number.isFinite(v)?v:null;
+        if(run===2) d.groupTime2 = Number.isFinite(v)?v:null;
+        calculateFinalGroupTime(d);
+        updateGroupsDisplay(); saveState();
+    }
+
+    function getCardById(id){ return appState.bonusCards.find(c=>c.id===id); }
+
+    // draw with modal animation
+    function drawBonusCard(id){
+        const d = appState.drivers.find(x=>x.id===id); if(!d) return;
+        if(!Number.isFinite(d.groupTime1) || !Number.isFinite(d.groupTime2)) return alert('Najpierw wpisz oba czasy!');
+        const card = appState.bonusCards[Math.floor(Math.random()*appState.bonusCards.length)];
+        d.bonusCardId = card.id;
+        calculateFinalGroupTime(d);
+        // show modal
+        showCardModal(card);
+        updateGroupsDisplay(); saveState();
+    }
+
+    function showCardModal(card){
+        const modal = document.getElementById('cardModal');
+        document.getElementById('modalGraphic').textContent = card.graphic||'🎴';
+        document.getElementById('modalTitle').textContent = card.name;
+        document.getElementById('modalDesc').textContent = describeCard(card);
+        modal.classList.add('show');
+    }
+    function closeModal(e){ if(e && e.target && e.target.id==='cardModal'){} document.getElementById('cardModal').classList.remove('show'); }
+
+    function describeCard(card){
+        if(card.effect==='repeat') return 'Możesz powtórzyć przejazd; wybrany jest lepszy wynik.';
+        if(card.effect==='worst') return 'Pechowy driver — twój czas staje się najgorszym czasem w tabeli.';
+        if(card.target==='better_multiply') return `Czas lepszego przejazdu mnożony przez ${card.effect}`;
+        if(card.target==='worse_multiply') return `Czas gorszego przejazdu mnożony przez ${card.effect}`;
+        if(card.target==='worse') return `${card.effect>0?'+':''}${card.effect}s do gorszego przejazdu`;
+        if(card.target==='better') return `${card.effect>0?'+':''}${card.effect}s do lepszego przejazdu`;
+        return 'Bonus specjalny';
+    }
+
+    function calculateFinalGroupTime(driver){
+        if(!Number.isFinite(driver.groupTime1) || !Number.isFinite(driver.groupTime2)) { driver.finalGroupTime = null; return; }
+        let t1 = driver.groupTime1, t2 = driver.groupTime2;
+        let better = Math.min(t1,t2), worse = Math.max(t1,t2);
+        if(driver.bonusCardId){
+            const card = getCardById(driver.bonusCardId);
+            if(!card) { driver.finalGroupTime = (t1+t2)/2; return; }
+            switch(card.effect){
+                case 'repeat':
+                    // realistically user would rerun — approximate as slight improvement over better
+                    driver.finalGroupTime = Math.min(better*0.98, (t1+t2)/2);
+                    break;
+                case 'worst':
+                    const allWorst = appState.drivers.filter(d=>Number.isFinite(d.groupTime1)&&Number.isFinite(d.groupTime2)).map(d=>Math.max(d.groupTime1,d.groupTime2));
+                    driver.finalGroupTime = allWorst.length?Math.max(...allWorst):worse;
+                    break;
+                default:
+                    if(card.target==='worse') worse = worse + card.effect;
+                    else if(card.target==='better') better = better + card.effect;
+                    else if(card.target==='better_multiply') better = better * card.effect;
+                    else if(card.target==='worse_multiply') worse = worse * card.effect;
+                    driver.finalGroupTime = (better + worse)/2;
+            }
+        } else {
+            driver.finalGroupTime = (t1+t2)/2;
+        }
+    }
+
+    // Show podiums — small visual (text) summary
+    function showGroupPodiums(){
+        Object.keys(appState.groups).forEach(g=>{
+            const arr = appState.groups[g].slice().sort((a,b)=> (a.finalGroupTime||a.avgTime||9999) - (b.finalGroupTime||b.avgTime||9999) );
+            if(arr.length) console.log(`Podium grupy ${g}: 1) ${arr[0].name} ${arr[0].finalGroupTime?arr[0].finalGroupTime.toFixed(2):arr[0].avgTime.toFixed(2)}s`);
+        });
+    }
+
+    // ===== helper: central update =====
+    function updateAllDisplays(){
+        // call each display updater safely (no-throw)
+        try{ updateDriversList(); }catch(e){}
+        try{ updateQualifyingList(); }catch(e){}
+        try{ updateGroupsDisplay(); }catch(e){}
+        try{ updateKnockoutBracket(); }catch(e){}
+        try{ updateStats(); }catch(e){}
+    }
+
+    // ===== Knockout =====
+    function startKnockout(){
+        // ensure groups sorted
+        Object.keys(appState.groups).forEach(g=>{
+            appState.groups[g].sort((a,b)=> (a.finalGroupTime||a.avgTime||9999) - (b.finalGroupTime||b.avgTime||9999));
+        });
+        syncDriversFromGroups();
+        // create initial 1v1 rounds per spec
+        const matches = [];
+        const pairs = [ [appState.groups.A[0], appState.groups.B[0]], [appState.groups.C[0], appState.groups.D[0]], [appState.groups.A[1], appState.groups.B[1]], [appState.groups.C[1], appState.groups.D[1]], [appState.groups.A[2], appState.groups.B[2]], [appState.groups.C[2], appState.groups.D[2]] ];
+        pairs.forEach((p,idx)=>{ if(p[0] && p[1]) matches.push({ id: 'm'+idx, name: `Mecz ${idx+1}`, drivers: [p[0],p[1]] }) });
+        appState.knockoutBracket = [{ round:'1vs1', matches }];
+        showTab('knockout'); updateKnockoutBracket(); saveState();
+    }
+
+    function updateKnockoutBracket(){
+        const bracket = document.getElementById('tournamentBracket');
+        bracket.innerHTML = appState.knockoutBracket.map((roundObj, rIdx)=>`
+            <div class="card">
+                <h3>${escapeHtml(roundObj.round)}</h3>
+                <div class="bracket">
+                    ${roundObj.matches.map((match, mIdx)=>`
+                        <div class="match">
+                            <div style="font-weight:700;color:var(--primary);margin-bottom:8px">${escapeHtml(match.name)}</div>
+                            <div class="match-drivers">
+                                ${match.drivers.map(dr=>dr?`
+                                    <div class="match-driver">
+                                        <div>${escapeHtml(dr.name)}</div>
+                                        <div style="display:flex;gap:6px;align-items:center">
+                                            <input type="number" class="time-input" placeholder="Czas wyścigu" step="0.01" onchange="updateMatchTime(${rIdx}, '${match.id}', '${dr.id}', this.value)">
+                                            ${match.winner===dr.id? '🏆':''}
+                                        </div>
+                                    </div>
+                                `:'<div class="match-driver">TBD</div>').join('')}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                ${rIdx===0?`<button onclick="generateQuarterFinals()" style="margin-top:12px;width:100%">Generuj ćwierćfinały →</button>`:''}
+                ${roundObj.round==='Ćwierćfinały'?`<button onclick="generateSemiFinals()" style="margin-top:12px;width:100%">Generuj półfinały →</button>`:''}
+                ${roundObj.round==='Półfinały'?`<button onclick="generateFinal()" style="margin-top:12px;width:100%">Generuj finał →</button>`:''}
+            </div>
+        `).join('');
+    }
+
+    function updateMatchTime(roundIdx, matchId, driverId, value){
+        const roundObj = appState.knockoutBracket[roundIdx]; if(!roundObj) return;
+        const match = roundObj.matches.find(m=>m.id===matchId); if(!match) return;
+        const driver = match.drivers.find(d=>d && d.id===driverId); if(!driver) return;
+        const v = value===''?null:parseFloat(value);
+        driver.matchTime = Number.isFinite(v)?v:null;
+        // if both times present, decide
+        if(match.drivers.every(d=>d && Number.isFinite(d.matchTime))){
+            const winner = match.drivers.reduce((a,b)=> a.matchTime < b.matchTime ? a : b);
+            match.winner = winner.id;
+        }
+        updateKnockoutBracket(); saveState();
+    }
+
+    function generateQuarterFinals(){
+        const firstRound = appState.knockoutBracket[0];
+        const winners = firstRound.matches.filter(m=>m.winner).map(m=>m.drivers.find(d=>d.id===m.winner));
+        if(winners.length < 4) return alert('Najpierw zakończ wszystkie mecze 1vs1!');
+        appState.knockoutBracket.push({ round:'Ćwierćfinały', matches: [ { id:'q1', name:'Ćwierćfinał 1', drivers:[winners[0],winners[3]] }, { id:'q2', name:'Ćwierćfinał 2', drivers:[winners[1],winners[2]] } ] });
+        updateKnockoutBracket(); saveState();
+    }
+
+    function generateSemiFinals(){
+        const last = appState.knockoutBracket[appState.knockoutBracket.length-1];
+        const winners = last.matches.filter(m=>m.winner).map(m=>m.drivers.find(d=>d.id===m.winner));
+        if(winners.length < 2) return alert('Najpierw zakończ wszystkie ćwierćfinały!');
+        appState.knockoutBracket.push({ round:'Półfinały', matches: [ { id:'s1', name:'Półfinał', drivers: winners } ] });
+        updateKnockoutBracket(); saveState();
+    }
+
+    function generateFinal(){
+        const last = appState.knockoutBracket[appState.knockoutBracket.length-1];
+        if(!last || !last.matches[0] || !last.matches[0].winner) return alert('Najpierw zakończ półfinał!');
+        const winnerId = last.matches[0].winner;
+        const winner = last.matches[0].drivers.find(d=>d.id===winnerId);
+        if(!winner) return;
+        appState.knockoutBracket.push({ round:'FINAŁ', matches:[ { id:'f1', name:'🏆 ZWYCIĘZCA TURNIEJU 🏆', drivers:[winner], winner: winner.id } ] });
+        showTab('stats'); updateStats(); saveState();
+    }
+
+    // ===== Stats =====
+    function updateStats(){
+        const stats = document.getElementById('tournamentStats');
+        const times = appState.drivers.filter(d=>Number.isFinite(d.avgTime)).map(d=>d.avgTime);
+        if(!times.length) { stats.innerHTML = '<div class="stat-card">Brak danych</div>'; return; }
+        const fastest = Math.min(...times), slowest = Math.max(...times), avg = times.reduce((a,b)=>a+b,0)/times.length;
+        const finalRound = appState.knockoutBracket.find(r=>r.round==='FINAŁ');
+        const champion = finalRound ? finalRound.matches[0].drivers[0] : null;
+        stats.innerHTML = `
+            <div class="stat-card"><div class="stat-label">Liczba kierowców</div><div class="stat-value">${appState.drivers.length}</div></div>
+            <div class="stat-card"><div class="stat-label">Najszybszy czas kwalifikacji</div><div class="stat-value">${fastest.toFixed(2)}s</div></div>
+            <div class="stat-card"><div class="stat-label">Najwolniejszy czas kwalifikacji</div><div class="stat-value">${slowest.toFixed(2)}s</div></div>
+            <div class="stat-card"><div class="stat-label">Średni czas kwalifikacji</div><div class="stat-value">${avg.toFixed(2)}s</div></div>
+        `;
+        if(champion){ document.getElementById('finalWinner').innerHTML = `
+            <div class="card" style="text-align:center;background:linear-gradient(135deg,var(--group-a),var(--warning))">
+                <div style="font-size:2.2rem">🏆</div>
+                <h2 style="margin:8px 0;color:white">${escapeHtml(champion.name)}</h2>
+                <div style="color:white">Grupa ${escapeHtml(champion.group||'N/A')} | Czas kwalifikacji: ${isNumber(champion.avgTime)?champion.avgTime.toFixed(2)+'s':'-'}</div>
+            </div>
+        `; }
+    }
+
+    // ===== Utilities =====
+    function escapeHtml(s){ return String(s).replace(/[&<>\\\"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    // Reset
+    document.getElementById('resetBtn').addEventListener('click', ()=>{
+        if(!confirm('Czy na pewno chcesz zresetować turniej?')) return; localStorage.removeItem('racingTournament'); location.reload();
+    });
+
+    // init
+    window.addEventListener('load', ()=>{ loadState(); });
+    // expose some for debugging
+    window.appState = appState;
+    </script>
+</body>
+</html>
