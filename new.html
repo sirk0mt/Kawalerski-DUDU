@@ -46,6 +46,10 @@
         .modal-card{background:#111;padding:20px;border-radius:12px;min-width:280px;text-align:center;border:2px solid rgba(255,255,255,0.06)}
         .card-graphic{font-size:48px;margin-bottom:8px}
 
+        /* podium modal */
+        .podium-grid{display:grid;gap:12px}
+        .podium-item{background:rgba(255,255,255,0.03);padding:10px;border-radius:8px;text-align:left}
+
         @media(max-width:700px){.time-input{width:95px}}    
     </style>
 </head>
@@ -124,6 +128,15 @@
             <div id="modalTitle" style="font-weight:700;margin-bottom:6px">Karta</div>
             <div id="modalDesc" style="color:#ccc;margin-bottom:12px">Opis</div>
             <button onclick="closeModal()">OK</button>
+        </div>
+    </div>
+
+    <!-- Modal for podiums -->
+    <div id="podiumModal" class="modal" onclick="closePodiumModal(event)">
+        <div class="modal-card" id="podiumCard" onclick="event.stopPropagation()">
+            <h2 style="margin-bottom:8px">Podium grup</h2>
+            <div id="podiumContent" class="podium-grid"></div>
+            <div style="margin-top:12px"><button onclick="closePodiumModal()">Zamknij</button></div>
         </div>
     </div>
 
@@ -361,11 +374,26 @@
 
     // Show podiums — small visual (text) summary
     function showGroupPodiums(){
+        // build HTML content for podium modal
+        const podiumContainer = document.getElementById('podiumContent');
+        let html = '';
         Object.keys(appState.groups).forEach(g=>{
             const arr = appState.groups[g].slice().sort((a,b)=> (a.finalGroupTime||a.avgTime||9999) - (b.finalGroupTime||b.avgTime||9999) );
-            if(arr.length) console.log(`Podium grupy ${g}: 1) ${arr[0].name} ${arr[0].finalGroupTime?arr[0].finalGroupTime.toFixed(2):arr[0].avgTime.toFixed(2)}s`);
+            if(arr.length){
+                const top = arr.slice(0,3);
+                html += `<div class="podium-item"><strong>Grupa ${g}</strong><ol>`;
+                top.forEach((p,idx)=>{
+                    const time = isNumber(p.finalGroupTime) ? p.finalGroupTime.toFixed(2)+'s' : (isNumber(p.avgTime)?p.avgTime.toFixed(2)+'s':'-');
+                    html += `<li>${escapeHtml(p.name)} — ${time}</li>`;
+                });
+                html += `</ol></div>`;
+            }
         });
+        podiumContainer.innerHTML = html || '<div class="podium-item">Brak danych</div>';
+        // show modal
+        document.getElementById('podiumModal').classList.add('show');
     }
+    function closePodiumModal(e){ if(e && e.target && e.target.id==='podiumModal'){} document.getElementById('podiumModal').classList.remove('show'); }
 
     // ===== helper: central update =====
     function updateAllDisplays(){
@@ -406,7 +434,7 @@
                                     <div class="match-driver">
                                         <div>${escapeHtml(dr.name)}</div>
                                         <div style="display:flex;gap:6px;align-items:center">
-                                            <input type="number" class="time-input" placeholder="Czas wyścigu" step="0.01" onchange="updateMatchTime(${rIdx}, '${match.id}', '${dr.id}', this.value)">
+                                            <input type="number" class="time-input" placeholder="Czas wyścigu" step="0.01" value="${Number.isFinite(dr.matchTime)?dr.matchTime:''}" onchange="updateMatchTime(${rIdx}, '${match.id}', '${dr.id}', this.value)">
                                             ${match.winner===dr.id? '🏆':''}
                                         </div>
                                     </div>
@@ -432,7 +460,11 @@
         if(match.drivers.every(d=>d && Number.isFinite(d.matchTime))){
             const winner = match.drivers.reduce((a,b)=> a.matchTime < b.matchTime ? a : b);
             match.winner = winner.id;
+        } else {
+            // clear winner if incomplete
+            delete match.winner;
         }
+        // update DOM but avoid losing focus by updating only bracket container
         updateKnockoutBracket(); saveState();
     }
 
@@ -486,7 +518,7 @@
     }
 
     // ===== Utilities =====
-    function escapeHtml(s){ return String(s).replace(/[&<>\\\"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function escapeHtml(s){ return String(s).replace(/[&<>\\"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
     // Reset
     document.getElementById('resetBtn').addEventListener('click', ()=>{
