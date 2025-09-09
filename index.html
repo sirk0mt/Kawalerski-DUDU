@@ -1,942 +1,570 @@
 <!DOCTYPE html>
 <html lang="pl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kawalerka Racing Challenge</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, where, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        
-        // --- Firebase Globals ---
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-        let app, db, auth, userId;
-        let eventDataRef;
-        let unsubscribe;
-
-        const mainState = {
-            players: [],
-            groups: {
-                A: [],
-                B: [],
-                C: [],
-                D: []
-            },
-            currentStage: 'qualifications',
-            bonusCards: [
-                { name: 'Turbo', effect: (time) => time - 1.5, target: 'worse', icon: '🚀', image: 'https://placehold.co/150x200/52839b/white?text=Turbo' },
-                { name: 'Nitro', effect: (time) => time - 2, target: 'worse', icon: '🔥', image: 'https://placehold.co/150x200/9b2c2c/white?text=Nitro' },
-                { name: 'Czysta Linia', effect: 'do-over', target: 'do-over', icon: '🎯', image: 'https://placehold.co/150x200/6b7280/white?text=Czysta+Linia' },
-                { name: 'Lepsze Opony', effect: (time) => time * 0.98, target: 'better', icon: '🏎️', image: 'https://placehold.co/150x200/2f4477/white?text=Lepsze+Opony' },
-                { name: 'Lepsze Paliwo', effect: (time) => time - 1, target: 'worse', icon: '⛽', image: 'https://placehold.co/150x200/77512f/white?text=Lepsze+Paliwo' },
-                { name: 'Perfekcyjny Start', effect: (time) => time - 2.137, target: 'worse', icon: '🏁', image: 'https://placehold.co/150x200/60905e/white?text=Perfekcyjny+Start' },
-                { name: 'Złapałeś Kapcia', effect: (time) => time + 2, target: 'better', icon: '🛞', image: 'https://placehold.co/150x200/222222/white?text=Złapałeś+Kapcia' },
-                { name: 'Śliska Nawierzchnia', effect: (time) => time + 1.5, target: 'better', icon: '⛸️', image: 'https://placehold.co/150x200/a8c2f2/white?text=Śliska+Nawierzchnia' },
-                { name: 'Pechowy Zakręt', effect: (time) => time + 2.5, target: 'worse', icon: '💀', image: 'https://placehold.co/150x200/000000/white?text=Pechowy+Zakręt' },
-                { name: 'Zmęczenie', effect: (time) => time + 1.69, target: 'better', icon: '😴', image: 'https://placehold.co/150x200/404040/white?text=Zmęczenie' },
-                { name: 'Pechowy Driver', effect: 'worst-time', target: 'better', icon: '🤡', image: 'https://placehold.co/150x200/e6c93f/white?text=Pechowy+Driver' },
-                { name: 'Pit Stop', effect: (time) => time * 1.02, target: 'worse', icon: '🔧', image: 'https://placehold.co/150x200/323c6b/white?text=Pit+Stop' }
-            ],
-            tournamentBracket: null,
-            worstTime: null,
-            isAuthReady: false
-        };
-
-        const stageConfig = {
-            'qualifications': { title: '1. Kwalifikacje', description: 'Wpisz czasy przejazdów, aby podzielić zawodników na grupy.' },
-            'eliminations': { title: '2. Eliminacje Grupowe', description: 'Wpisz czasy i wylosuj karty bonusowe.' },
-            'elimination-podium': { title: '2.1. Podium Eliminacji', description: 'Gratulacje dla najlepszych z każdej grupy!' },
-            'bracket': { title: '3. Drabinka', description: 'Wybierz zwycięzców, aby przejść do kolejnego etapu.' },
-            'final-podium': { title: '3.1. Finałowe Podium', description: 'Zwycięzca Kawalerka Racing Challenge został wyłoniony!' }
-        };
-
-        // --- DOM Elements ---
-        const playerForm = document.getElementById('player-form');
-        const playerNameInput = document.getElementById('player-name');
-        const stage1Table = document.getElementById('stage1-table');
-        const startEliminationsBtn = document.getElementById('start-eliminations-btn');
-        const startBracketBtn = document.getElementById('start-bracket-btn');
-        const nextRoundBtn = document.getElementById('next-round-btn');
-        const stage2Container = document.getElementById('stage2-container');
-        const bracketContainer = document.getElementById('bracket-container');
-        const stageTitle = document.getElementById('stage-title');
-        const stageDescription = document.getElementById('stage-description');
-        const appIdDisplay = document.getElementById('app-id-display');
-        const userIdDisplay = document.getElementById('user-id-display');
-        const confirmModal = document.getElementById('confirm-modal');
-        const confirmOkBtn = document.getElementById('confirm-ok-btn');
-        const confirmCancelBtn = document.getElementById('confirm-cancel-btn');
-        const modalMessage = document.getElementById('modal-message');
-        const cardModal = document.getElementById('card-modal');
-        const cardNameDisplay = document.getElementById('card-name-display');
-        const cardResult = document.getElementById('card-result');
-        const cardAnimationContainer = document.getElementById('card-animation-container');
-
-        let isConfirming = false;
-
-        function showModal(message, callback) {
-            if (isConfirming) return;
-            isConfirming = true;
-            modalMessage.textContent = message;
-            confirmModal.classList.remove('hidden');
-
-            const okHandler = () => {
-                isConfirming = false;
-                confirmModal.classList.add('hidden');
-                confirmOkBtn.removeEventListener('click', okHandler);
-                confirmCancelBtn.removeEventListener('click', cancelHandler);
-                if (callback) callback(true);
-            };
-
-            const cancelHandler = () => {
-                isConfirming = false;
-                confirmModal.classList.add('hidden');
-                confirmOkBtn.removeEventListener('click', okHandler);
-                confirmCancelBtn.removeEventListener('click', cancelHandler);
-                if (callback) callback(false);
-            };
-
-            confirmOkBtn.addEventListener('click', okHandler);
-            confirmCancelBtn.addEventListener('click', cancelHandler);
-        }
-
-        // --- Firebase Init and Sync ---
-        window.onload = async () => {
-            try {
-                if (firebaseConfig.projectId) {
-                    app = initializeApp(firebaseConfig);
-                    db = getFirestore(app);
-                    auth = getAuth(app);
-                    appIdDisplay.textContent = `ID aplikacji: ${appId}`;
-                    userIdDisplay.textContent = `Ładowanie użytkownika...`;
-                    
-                    onAuthStateChanged(auth, async (user) => {
-                        if (user) {
-                            userId = user.uid;
-                            userIdDisplay.textContent = `ID użytkownika: ${userId}`;
-                            eventDataRef = doc(db, `/artifacts/${appId}/public/data/event-data/event-info`);
-                            
-                            const docSnap = await getDoc(eventDataRef);
-                            if (docSnap.exists()) {
-                                const data = docSnap.data();
-                                Object.assign(mainState, data);
-                            } else {
-                                await setDoc(eventDataRef, mainState);
-                            }
-                            mainState.isAuthReady = true;
-                            renderUI();
-                            setupRealtimeListener();
-                        } else {
-                            if (initialAuthToken) {
-                                await signInWithCustomToken(auth, initialAuthToken);
-                            } else {
-                                await signInAnonymously(auth);
-                            }
-                        }
-                    });
-                } else {
-                    console.error("Firebase config is missing. App will run locally without persistence.");
-                    mainState.isAuthReady = true;
-                    renderUI();
-                }
-            } catch (e) {
-                console.error("Error initializing Firebase:", e);
-                console.log("App will run locally without persistence.");
-                mainState.isAuthReady = true;
-                renderUI();
-            }
-        };
-
-        function setupRealtimeListener() {
-            if (unsubscribe) {
-                unsubscribe();
-            }
-            if (!eventDataRef) {
-                console.error('Firebase reference not available for listener.');
-                return;
-            }
-            unsubscribe = onSnapshot(eventDataRef, (doc) => {
-                if (doc.exists()) {
-                    const data = doc.data();
-                    Object.assign(mainState, data);
-                    renderUI();
-                } else {
-                    resetState();
-                    renderUI();
-                }
-            });
-        }
-
-        async function saveData() {
-            if (eventDataRef) {
-                try {
-                    const { bonusCards, ...dataToSave } = mainState;
-                    await setDoc(eventDataRef, dataToSave);
-                } catch (e) {
-                    console.error("Error saving data:", e);
-                }
-            } else {
-                console.log("Not connected to Firebase, data not saved.");
-            }
-        }
-        
-        async function resetEvent() {
-            showModal('Czy na pewno chcesz zresetować całą imprezę? To usunie wszystkie dane.', async (result) => {
-                if (result) {
-                    try {
-                        if (eventDataRef) {
-                            await deleteDoc(eventDataRef);
-                        }
-                        resetState();
-                        renderUI();
-                    } catch (e) {
-                        console.error("Error resetting event:", e);
-                        resetState();
-                        renderUI();
-                    }
-                }
-            });
-        }
-
-        function resetState() {
-            mainState.players = [];
-            mainState.groups = { A: [], B: [], C: [], D: [] };
-            mainState.currentStage = 'qualifications';
-            mainState.tournamentBracket = null;
-            mainState.worstTime = null;
-            saveData();
-        }
-
-        function createSanitizedId(name) {
-            return name.trim().toLowerCase().replace(/\s/g, '_');
-        }
-
-        // --- Stage 1: Qualifications ---
-        playerForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const playerName = playerNameInput.value.trim();
-            if (playerName && !mainState.players.find(p => p.name.toLowerCase() === playerName.toLowerCase())) {
-                const newPlayer = {
-                    id: createSanitizedId(playerName),
-                    name: playerName,
-                    qualTimes: [null, null],
-                    avgQualTime: null,
-                    group: null,
-                    elimTimes: [null, null],
-                    cardEffect: null,
-                    finalTime: null
-                };
-                mainState.players.push(newPlayer);
-                saveData();
-                playerNameInput.value = '';
-                renderUI();
-            }
-        });
-
-        function updateQualTime(element) {
-            const playerId = element.id.split('-')[3];
-            const timeIndex = parseInt(element.id.split('-')[2]);
-            const player = mainState.players.find(p => p.id === playerId);
-            if (!player) return;
-
-            const value = parseFloat(element.value);
-            player.qualTimes[timeIndex - 1] = isNaN(value) ? null : value;
-
-            if (player.qualTimes.every(t => t !== null && !isNaN(t))) {
-                player.avgQualTime = (player.qualTimes[0] + player.qualTimes[1]) / 2;
-            } else {
-                player.avgQualTime = null;
-            }
-
-            // Update the DOM for the specific player's average time
-            const avgTimeCell = document.getElementById(`avg-qual-time-${player.id}`);
-            if (avgTimeCell) {
-                avgTimeCell.textContent = player.avgQualTime !== null ? player.avgQualTime.toFixed(3) + ' s' : '-';
-            }
-            
-            saveData();
-            checkAndToggleStartButton();
-        }
-
-        function checkAndToggleStartButton() {
-             const allTimesFilled = mainState.players.length > 0 && mainState.players.every(p => p.avgQualTime !== null);
-             if (allTimesFilled) {
-                 startEliminationsBtn.classList.remove('hidden');
-             } else {
-                 startEliminationsBtn.classList.add('hidden');
-             }
-        }
-
-        function calculateQualifications() {
-            let allTimesValid = true;
-            mainState.players.forEach(p => {
-                if (p.avgQualTime === null) {
-                    allTimesValid = false;
-                }
-            });
-
-            if (!allTimesValid) {
-                showModal('Uzupełnij wszystkie czasy kwalifikacji, aby przejść dalej.');
-                return;
-            }
-
-            mainState.players.sort((a, b) => a.avgQualTime - b.avgQualTime);
-            
-            const groupSize = Math.ceil(mainState.players.length / 4);
-            mainState.groups.A = shuffle(mainState.players.slice(0, groupSize));
-            mainState.groups.B = shuffle(mainState.players.slice(groupSize, groupSize * 2));
-            mainState.groups.C = shuffle(mainState.players.slice(groupSize * 2, groupSize * 3));
-            mainState.groups.D = shuffle(mainState.players.slice(groupSize * 3));
-
-            mainState.groups.A.forEach(p => p.group = 'A');
-            mainState.groups.B.forEach(p => p.group = 'B');
-            mainState.groups.C.forEach(p => p.group = 'C');
-            mainState.groups.D.forEach(p => p.group = 'D');
-            
-            mainState.currentStage = 'eliminations';
-            saveData();
-            renderUI();
-        }
-
-        // --- Stage 2: Eliminations ---
-        function checkAllEliminationDataFilled() {
-            for (const player of mainState.players) {
-                if (player.elimTimes[0] === null || player.elimTimes[1] === null || player.cardEffect === null) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        function updateElimTime(element, timeIndex) {
-            const playerId = element.getAttribute('data-player-id');
-            const player = mainState.players.find(p => p.id === playerId);
-            if (!player) return;
-
-            const value = parseFloat(element.value);
-            player.elimTimes[timeIndex] = isNaN(value) ? null : value;
-            
-            calculateFinalTime(player);
-            
-            const finalTimeCell = document.getElementById(`final-time-${player.id}`);
-            if (finalTimeCell) {
-                finalTimeCell.textContent = player.finalTime !== null ? (player.finalTime === 'oczekiwanie' ? 'Oczekiwanie...' : player.finalTime.toFixed(3) + ' s') : '-';
-            }
-            
-            saveData();
-            checkAndToggleBracketButton();
-        }
-
-        function checkAndToggleBracketButton() {
-            if (checkAllEliminationDataFilled()) {
-                 startBracketBtn.classList.remove('hidden');
-            } else {
-                 startBracketBtn.classList.add('hidden');
-            }
-        }
-        
-        async function drawCard(playerId) {
-            const player = mainState.players.find(p => p.id === playerId);
-            if (!player) return;
-
-            if (player.cardEffect) {
-                showModal('Ten zawodnik już wylosował kartę bonusową!');
-                return;
-            }
-            
-            const drawnCard = mainState.bonusCards[Math.floor(Math.random() * mainState.bonusCards.length)];
-            
-            // Show and animate card modal
-            cardModal.classList.remove('hidden');
-            cardResult.classList.add('hidden');
-            cardAnimationContainer.classList.remove('hidden');
-            
-            // Generate and shuffle the card deck for animation
-            const cardDeck = shuffle([...mainState.bonusCards]);
-            cardAnimationContainer.innerHTML = '';
-            cardDeck.forEach((card, index) => {
-                const cardImage = document.createElement('img');
-                cardImage.src = 'https://placehold.co/150x200/52525b/white?text=Kawalerka+Racing';
-                cardImage.classList.add('card-image', 'absolute', 'transition-all', 'duration-300');
-                cardImage.style.zIndex = mainState.bonusCards.length - index;
-                cardImage.style.transform = `rotate(${Math.random() * 360}deg) translate(${Math.random() * 50 - 25}px, ${Math.random() * 50 - 25}px)`;
-                cardAnimationContainer.appendChild(cardImage);
-            });
-
-            await new Promise(resolve => setTimeout(resolve, 200));
-
-            // Run shuffling animation
-            const cardElements = document.querySelectorAll('.card-image');
-            cardElements.forEach(card => {
-                card.style.transform = `rotate(${Math.random() * 360}deg) translate(${Math.random() * 50 - 25}px, ${Math.random() * 50 - 25}px) scale(0.9)`;
-                card.style.opacity = 0.8;
-            });
-            await new Promise(resolve => setTimeout(resolve, 1500));
-
-            // Stop animation and reveal card
-            cardAnimationContainer.innerHTML = '';
-            const finalCardImage = document.createElement('img');
-            finalCardImage.src = drawnCard.image;
-            finalCardImage.classList.add('w-36', 'h-auto', 'animate-final-reveal');
-            cardAnimationContainer.appendChild(finalCardImage);
-
-            player.cardEffect = drawnCard.name;
-            
-            calculateFinalTime(player);
-
-            cardAnimationContainer.classList.add('hidden');
-            cardResult.classList.remove('hidden');
-            cardNameDisplay.textContent = drawnCard.name;
-            
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Show result
-            
-            cardModal.classList.add('hidden');
-
-            const cardEffectCell = document.getElementById(`card-effect-${player.id}`);
-            if (cardEffectCell) {
-                cardEffectCell.innerHTML = `<img src="${drawnCard.image}" class="w-12 h-auto inline-block mr-2 rounded-md shadow-md"> <span class="text-sm font-semibold">${p.cardEffect}</span>`;
-                const drawButton = document.querySelector(`button[onclick="drawCard('${player.id}')"]`);
-                if(drawButton) {
-                    drawButton.textContent = "Karta wylosowana";
-                    drawButton.disabled = true;
-                }
-            }
-
-            const finalTimeCell = document.getElementById(`final-time-${player.id}`);
-            if (finalTimeCell) {
-                finalTimeCell.textContent = player.finalTime !== null ? (player.finalTime === 'oczekiwanie' ? 'Oczekiwanie...' : player.finalTime.toFixed(3) + ' s') : '-';
-            }
-            
-            saveData();
-            checkAndToggleBracketButton();
-        }
-
-        function calculateFinalTime(player) {
-            if (player.elimTimes[0] === null || player.elimTimes[1] === null || player.cardEffect === null) {
-                player.finalTime = null;
-                return;
-            }
-            
-            const time1 = player.elimTimes[0];
-            const time2 = player.elimTimes[1];
-            const avgTime = (time1 + time2) / 2;
-
-            const drawnCard = mainState.bonusCards.find(card => card.name === player.cardEffect);
-            if (!drawnCard) {
-                player.finalTime = avgTime;
-                return;
-            }
-
-            let finalTime;
-            if (drawnCard.effect === 'do-over') {
-                finalTime = Math.min(time1, time2);
-            } else if (drawnCard.effect === 'worst-time') {
-                finalTime = 'oczekiwanie';
-            } else {
-                const betterTime = Math.min(time1, time2);
-                const worseTime = Math.max(time1, time2);
-
-                if (drawnCard.target === 'better') {
-                    finalTime = drawnCard.effect(betterTime) + (worseTime - betterTime);
-                } else if (drawnCard.target === 'worse') {
-                    finalTime = (betterTime) + (drawnCard.effect(worseTime) - worseTime);
-                }
-            }
-            player.finalTime = finalTime;
-        }
-
-        function finalizeEliminationsAndGoToPodium() {
-            if (!checkAllEliminationDataFilled()) {
-                showModal('Uzupełnij wszystkie czasy eliminacji i wylosuj karty, aby przejść dalej.');
-                return;
-            }
-            
-            const allTimes = mainState.players.flatMap(p => p.elimTimes.filter(t => t !== null));
-            mainState.worstTime = Math.max(...allTimes);
-
-            mainState.players.forEach(p => {
-                if (p.cardEffect === 'Pechowy Driver') {
-                    p.finalTime = mainState.worstTime;
-                }
-            });
-            
-            for (const group in mainState.groups) {
-                mainState.groups[group].sort((a, b) => a.finalTime - b.finalTime);
-            }
-            
-            mainState.currentStage = 'elimination-podium';
-            saveData();
-            renderUI();
-        }
-
-        function confirmPodiumAndMoveToBracket() {
-            mainState.currentStage = 'bracket';
-            createBracket();
-            saveData();
-            renderUI();
-        }
-
-        function createBracket() {
-            const sortedPlayers = {};
-            for (const group in mainState.groups) {
-                sortedPlayers[group] = mainState.groups[group].sort((a, b) => a.finalTime - b.finalTime);
-            }
-
-            const getPlayer = (group, rank) => sortedPlayers[group][rank - 1];
-            
-            mainState.tournamentBracket = {
-                round: 'Ćwierćfinały',
-                matches: [
-                    { player1: getPlayer('A', 1), player2: getPlayer('B', 1), winner: null },
-                    { player1: getPlayer('C', 1), player2: getPlayer('D', 1), winner: null },
-                    { player1: getPlayer('A', 2), player2: getPlayer('B', 2), winner: null },
-                    { player1: getPlayer('C', 2), player2: getPlayer('D', 2), winner: null },
-                    { player1: getPlayer('A', 3), player2: getPlayer('B', 3), winner: null },
-                    { player1: getPlayer('C', 3), player2: getPlayer('D', 3), winner: null }
-                ],
-                nextRound: []
-            };
-        }
-
-        function advanceToNextRound() {
-            if (!mainState.tournamentBracket) return;
-
-            const winners = mainState.tournamentBracket.matches.map(m => m.winner).filter(p => p !== null);
-            if (winners.length !== mainState.tournamentBracket.matches.length) {
-                showModal('Wybierz zwycięzców wszystkich meczy, aby przejść do kolejnej rundy!');
-                return;
-            }
-
-            const currentRound = mainState.tournamentBracket.round;
-            
-            if (currentRound === 'Ćwierćfinały') {
-                const nextMatches = [
-                    { player1: winners[0], player2: winners[1], winner: null },
-                    { player1: winners[2], player2: winners[3], winner: null },
-                    { player1: winners[4], player2: winners[5], winner: null } 
-                ];
-                mainState.tournamentBracket = {
-                    round: 'Półfinały',
-                    matches: nextMatches,
-                    nextRound: []
-                };
-            } else if (currentRound === 'Półfinały') {
-                const nextMatches = [
-                    { player1: winners[0], player2: winners[1], winner: null }
-                ];
-                mainState.tournamentBracket = {
-                    round: 'Finał',
-                    matches: nextMatches,
-                    nextRound: []
-                };
-            } else if (currentRound === 'Finał') {
-                 mainState.currentStage = 'final-podium';
-                 mainState.tournamentBracket.winner = winners[0];
-                 mainState.tournamentBracket.runnerUp = mainState.tournamentBracket.matches[0].player1 === winners[0] ? mainState.tournamentBracket.matches[0].player2 : mainState.tournamentBracket.matches[0].player1;
-            }
-
-            saveData();
-            renderUI();
-        }
-
-        function setWinner(matchIndex, playerIndex) {
-            const match = mainState.tournamentBracket.matches[matchIndex];
-            if (!match) return;
-            match.winner = (playerIndex === 1) ? match.player1 : match.player2;
-            saveData();
-            renderUI();
-        }
-        
-        // --- UI Rendering ---
-        function renderUI() {
-            stageTitle.textContent = stageConfig[mainState.currentStage].title;
-            stageDescription.textContent = stageConfig[mainState.currentStage].description;
-
-            document.getElementById('qualifications-section').classList.add('hidden');
-            document.getElementById('eliminations-section').classList.add('hidden');
-            document.getElementById('elimination-podium-section').classList.add('hidden');
-            document.getElementById('bracket-section').classList.add('hidden');
-            document.getElementById('final-podium-section').classList.add('hidden');
-            startEliminationsBtn.classList.add('hidden');
-            startBracketBtn.classList.add('hidden');
-            nextRoundBtn.classList.add('hidden');
-
-            if (mainState.currentStage === 'qualifications') {
-                document.getElementById('qualifications-section').classList.remove('hidden');
-                renderQualificationsTable();
-                checkAndToggleStartButton();
-            } else if (mainState.currentStage === 'eliminations') {
-                document.getElementById('eliminations-section').classList.remove('hidden');
-                renderEliminationsTable();
-                checkAndToggleBracketButton();
-            } else if (mainState.currentStage === 'elimination-podium') {
-                document.getElementById('elimination-podium-section').classList.remove('hidden');
-                renderEliminationPodium();
-            } else if (mainState.currentStage === 'bracket') {
-                document.getElementById('bracket-section').classList.remove('hidden');
-                renderBracket();
-            } else if (mainState.currentStage === 'final-podium') {
-                 document.getElementById('final-podium-section').classList.remove('hidden');
-                 renderFinalPodium();
-            }
-        }
-
-        function renderQualificationsTable() {
-            stage1Table.innerHTML = `
-                <table class="min-w-full bg-slate-800 rounded-lg overflow-hidden shadow-lg">
-                    <thead class="bg-slate-700 text-slate-300">
-                        <tr>
-                            <th class="py-3 px-4 text-left">Zawodnik</th>
-                            <th class="py-3 px-4 text-left">Przejazd 1 (s)</th>
-                            <th class="py-3 px-4 text-left">Przejazd 2 (s)</th>
-                            <th class="py-3 px-4 text-left">Śr. Czas</th>
-                        </tr>
-                    </thead>
-                    <tbody class="text-slate-200">
-                        ${mainState.players.map(p => `
-                            <tr class="border-b border-slate-700 hover:bg-slate-700 transition-colors">
-                                <td class="py-3 px-4 font-bold">${p.name}</td>
-                                <td class="py-3 px-4">
-                                    <input type="number" step="0.01" id="qual-time-1-${p.id}" value="${p.qualTimes[0] !== null ? p.qualTimes[0] : ''}" oninput="updateQualTime(this)" class="w-24 bg-slate-900 border border-slate-600 rounded-md p-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                </td>
-                                <td class="py-3 px-4">
-                                    <input type="number" step="0.01" id="qual-time-2-${p.id}" value="${p.qualTimes[1] !== null ? p.qualTimes[1] : ''}" oninput="updateQualTime(this)" class="w-24 bg-slate-900 border border-slate-600 rounded-md p-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                </td>
-                                <td id="avg-qual-time-${p.id}" class="py-3 px-4">${p.avgQualTime !== null ? p.avgQualTime.toFixed(3) + ' s' : '-'}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            `;
-        }
-
-        function renderEliminationsTable() {
-            const tableHTML = `
-                <div class="space-y-8">
-                    ${Object.entries(mainState.groups).map(([groupName, players]) => `
-                        <div class="p-6 bg-slate-800 rounded-lg shadow-xl">
-                            <h3 class="text-2xl font-bold text-slate-100 mb-4">Grupa ${groupName} - ${getGroupName(groupName)}</h3>
-                            <table class="min-w-full bg-slate-700 rounded-lg overflow-hidden">
-                                <thead class="bg-slate-600 text-slate-300">
-                                    <tr>
-                                        <th class="py-3 px-4 text-left">Zawodnik</th>
-                                        <th class="py-3 px-4 text-left">Przejazd 1 (s)</th>
-                                        <th class="py-3 px-4 text-left">Przejazd 2 (s)</th>
-                                        <th class="py-3 px-4 text-left">Karta Bonusowa</th>
-                                        <th class="py-3 px-4 text-left">Akcja</th>
-                                        <th class="py-3 px-4 text-left">Ostateczny Czas (s)</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="text-slate-200">
-                                    ${players.map(p => {
-                                        const card = mainState.bonusCards.find(c => c.name === p.cardEffect);
-                                        const cardDisplay = card ? `<img src="${card.image}" class="w-12 h-auto inline-block mr-2 rounded-md shadow-md"> <span class="text-sm font-semibold">${p.cardEffect}</span>` : '-';
-                                        return `
-                                            <tr class="border-b border-slate-600 hover:bg-slate-600 transition-colors">
-                                                <td class="py-3 px-4 font-bold">${p.name}</td>
-                                                <td class="py-3 px-4">
-                                                    <input type="number" step="0.01" data-player-id="${p.id}" data-time-index="0" value="${p.elimTimes[0] !== null ? p.elimTimes[0] : ''}" oninput="updateElimTime(this, 0)" class="w-24 bg-slate-900 border border-slate-600 rounded-md p-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                                </td>
-                                                <td class="py-3 px-4">
-                                                    <input type="number" step="0.01" data-player-id="${p.id}" data-time-index="1" value="${p.elimTimes[1] !== null ? p.elimTimes[1] : ''}" oninput="updateElimTime(this, 1)" class="w-24 bg-slate-900 border border-slate-600 rounded-md p-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                                </td>
-                                                <td id="card-effect-${p.id}" class="py-3 px-4">${cardDisplay}</td>
-                                                <td class="py-3 px-4">
-                                                    <button onclick="drawCard('${p.id}')" class="bg-yellow-500 hover:bg-yellow-600 text-slate-900 font-bold py-1 px-3 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed" ${p.cardEffect ? 'disabled' : ''}>
-                                                        ${p.cardEffect ? 'Karta wylosowana' : 'Losuj Kartę'}
-                                                    </button>
-                                                </td>
-                                                <td id="final-time-${p.id}" class="py-3 px-4 font-semibold">${p.finalTime !== null ? (p.finalTime === 'oczekiwanie' ? 'Oczekiwanie...' : p.finalTime.toFixed(3) + ' s') : '-'}</td>
-                                            </tr>
-                                        `;
-                                    }).join('')}
-                                </tbody>
-                            </table>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-            stage2Container.innerHTML = tableHTML;
-        }
-        
-        function renderEliminationPodium() {
-            const podiumHTML = `
-                <div class="space-y-8">
-                    ${Object.entries(mainState.groups).map(([groupName, players]) => {
-                        const top3 = players.slice(0, 3);
-                        return `
-                            <div class="p-6 bg-slate-800 rounded-lg shadow-xl">
-                                <h3 class="text-2xl font-bold text-slate-100 mb-4 text-center">Podium Grupy ${groupName} - ${getGroupName(groupName)}</h3>
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
-                                    ${top3.map((p, index) => {
-                                        const position = index + 1;
-                                        const color = position === 1 ? 'text-yellow-400' : position === 2 ? 'text-slate-400' : 'text-amber-700';
-                                        return `
-                                            <div class="bg-slate-700 p-4 rounded-lg shadow-md">
-                                                <p class="text-4xl font-extrabold ${color} mb-2">${position}.</p>
-                                                <p class="text-xl font-bold">${p.name}</p>
-                                                <p class="text-lg font-semibold text-slate-300">${p.finalTime.toFixed(3)} s</p>
-                                                <p class="text-sm italic text-slate-400">Karta: ${p.cardEffect}</p>
-                                            </div>
-                                        `;
-                                    }).join('')}
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-                <div class="flex justify-center mt-8">
-                    <button onclick="confirmPodiumAndMoveToBracket()" class="px-8 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-full font-bold text-lg shadow-lg transition-colors transform hover:scale-105">
-                        Przejdź do Drabinki
-                    </button>
-                </div>
-            `;
-            document.getElementById('elimination-podium-section').innerHTML = podiumHTML;
-        }
-
-
-        function renderBracket() {
-            if (!mainState.tournamentBracket || mainState.tournamentBracket.matches.length === 0) {
-                bracketContainer.innerHTML = `<p class="text-xl text-slate-400 text-center">Drabinka turniejowa jest pusta. Upewnij się, że ukończono poprzednie etapy.</p>`;
-                nextRoundBtn.classList.add('hidden');
-                return;
-            }
-
-            nextRoundBtn.classList.remove('hidden');
-
-            const bracketHTML = `
-                <div class="space-y-8">
-                    <h3 class="text-3xl font-bold text-slate-100 text-center">${mainState.tournamentBracket.round}</h3>
-                    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        ${mainState.tournamentBracket.matches.map((match, index) => `
-                            <div class="p-6 bg-slate-800 rounded-lg shadow-xl">
-                                <div class="flex flex-col items-center space-y-4">
-                                    <div class="w-full flex justify-between items-center bg-slate-900 p-4 rounded-lg">
-                                        <button onclick="setWinner(${index}, 1)" class="w-1/2 p-2 rounded-l-lg ${match.winner && match.winner.id === match.player1.id ? 'bg-blue-600' : 'bg-slate-700 hover:bg-slate-600'} text-slate-200 font-bold transition-colors text-center">
-                                            ${match.player1 ? match.player1.name : 'TBD'}
-                                        </button>
-                                        <span class="text-slate-400 mx-2 font-bold">vs</span>
-                                        <button onclick="setWinner(${index}, 2)" class="w-1/2 p-2 rounded-r-lg ${match.winner && match.winner.id === match.player2.id ? 'bg-blue-600' : 'bg-slate-700 hover:bg-slate-600'} text-slate-200 font-bold transition-colors text-center">
-                                            ${match.player2 ? match.player2.name : 'TBD'}
-                                        </button>
-                                    </div>
-                                    <div class="text-slate-400 font-semibold">
-                                        Zwycięzca: ${match.winner ? match.winner.name : 'Jeszcze nie wybrano'}
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-            bracketContainer.innerHTML = bracketHTML;
-        }
-
-        function renderFinalPodium() {
-            const winner = mainState.tournamentBracket.winner;
-            const runnerUp = mainState.tournamentBracket.runnerUp;
-            const finalPodiumHTML = `
-                <div class="p-8 bg-slate-800 rounded-lg shadow-xl text-center">
-                    <h2 class="text-4xl font-extrabold text-blue-500 mb-6">Finałowe Podium</h2>
-                    <div class="flex flex-col items-center space-y-8">
-                        <!-- Winner -->
-                        <div class="bg-gradient-to-t from-slate-700 to-slate-600 p-6 rounded-lg shadow-lg transform scale-110">
-                            <p class="text-6xl font-black text-yellow-400 mb-2">1. Miejsce</p>
-                            <p class="text-3xl font-bold">${winner.name}</p>
-                            <p class="text-lg italic text-slate-300">Zwycięzca Kawalerka Racing Challenge!</p>
-                        </div>
-                        <!-- Runner-up -->
-                        <div class="bg-slate-700 p-4 rounded-lg shadow-md">
-                            <p class="text-3xl font-black text-slate-400 mb-1">2. Miejsce</p>
-                            <p class="text-xl font-bold">${runnerUp.name}</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-            document.getElementById('final-podium-section').innerHTML = finalPodiumHTML;
-        }
-
-        function getGroupName(group) {
-            switch(group) {
-                case 'A': return 'Zapierdalacze';
-                case 'B': return 'Średni czyli Super';
-                case 'C': return 'Niedzielni Kierowcy';
-                case 'D': return 'Zaślimaczeni';
-                default: return 'Nieznana Grupa';
-            }
-        }
-        
-        function shuffle(array) {
-            let currentIndex = array.length, randomIndex;
-            while (currentIndex !== 0) {
-                randomIndex = Math.floor(Math.random() * currentIndex);
-                currentIndex--;
-                [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
-            }
-            return array;
-        }
-
-        // Expose functions to the global scope for onclick attributes
-        window.drawCard = drawCard;
-        window.setWinner = setWinner;
-        window.resetEvent = resetEvent;
-        window.calculateQualifications = calculateQualifications;
-        window.finalizeEliminationsAndGoToPodium = finalizeEliminationsAndGoToPodium;
-        window.confirmPodiumAndMoveToBracket = confirmPodiumAndMoveToBracket;
-        window.advanceToNextRound = advanceToNextRound;
-        window.updateQualTime = updateQualTime;
-        window.updateElimTime = updateElimTime;
-    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>🏁 Turniej Wyścigowy - Wieczór Kawalerski</title>
+    <meta name="description" content="Prosty manager turnieju wyścigowego (kwalifikacje → grupy → faza pucharowa) gotowy na GitHub Pages." />
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #1a202c; /* Dark slate background */
-            color: #e2e8f0; /* Light text */
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-        input[type="number"]::-webkit-outer-spin-button,
-        input[type="number"]::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-        }
-        input[type="number"] {
-            -moz-appearance: textfield;
-        }
-        .card-image {
-            width: 100px;
-            height: 150px;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-            transition: all 0.3s ease-in-out;
-        }
-        @keyframes shuffle {
-            0% {
-                transform: rotate(0deg) translate(0, 0);
-            }
-            25% {
-                transform: rotate(10deg) translate(-10px, -10px);
-            }
-            50% {
-                transform: rotate(-10deg) translate(10px, 10px);
-            }
-            75% {
-                transform: rotate(5deg) translate(-5px, 5px);
-            }
-            100% {
-                transform: rotate(0deg) translate(0, 0);
-            }
-        }
-        @keyframes final-reveal {
-            0% {
-                transform: scale(0.5) rotateY(180deg);
-                opacity: 0;
-            }
-            100% {
-                transform: scale(1) rotateY(0deg);
-                opacity: 1;
-            }
-        }
-        .animate-final-reveal {
-            animation: final-reveal 1s cubic-bezier(0.68, -0.55, 0.27, 1.55) forwards;
-        }
+        /* (styles unchanged except small cleanups) */
+        *{margin:0;padding:0;box-sizing:border-box}
+        :root{--primary:#ff3333;--secondary:#333;--success:#4CAF50;--warning:#ff9800;--danger:#f44336;--group-a:#FFD700;--group-b:#C0C0C0;--group-c:#CD7F32;--group-d:#8B4513}
+        body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:linear-gradient(135deg,#1e1e1e 0%,#2d2d2d 100%);color:#fff;min-height:100vh;padding:20px}
+        .container{max-width:1200px;margin:0 auto}
+        h1{text-align:center;font-size:2.2em;margin-bottom:10px;background:linear-gradient(45deg,var(--primary),#ff6666);-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:2px 2px 4px rgba(0,0,0,.25)}
+        .subtitle{text-align:center;font-size:1.05em;color:#aaa;margin-bottom:20px}
+        .tabs{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;justify-content:center}
+        .tab{padding:10px 18px;background:var(--secondary);border:none;color:white;cursor:pointer;border-radius:30px;font-size:1em;transition:all .2s}
+        .tab.active{background:var(--primary);box-shadow:0 5px 20px rgba(255,51,51,.25)}
+        .tab-content{display:none}
+        .tab-content.active{display:block}
+        .card{background:rgba(255,255,255,.04);border-radius:12px;padding:18px;margin-bottom:18px;backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.06)}
+        .input-group{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+        input,select,button{font:inherit}
+        input,select{flex:1;padding:10px;border:2px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);color:white;border-radius:8px;min-width:160px}
+        button{padding:10px 18px;background:var(--primary);color:white;border:none;border-radius:8px;cursor:pointer}
+        button:disabled{background:#666;cursor:not-allowed}
+        .drivers-list{display:grid;gap:10px;margin-top:10px}
+        .driver-item{display:flex;justify-content:space-between;align-items:center;padding:12px;background:rgba(255,255,255,.03);border-radius:8px}
+        .time-input{width:110px}
+        .group-badge{padding:5px 12px;border-radius:20px;font-weight:700;text-transform:uppercase;font-size:.85em;display:inline-block;margin-left:10px}
+        .group-A{background:var(--group-a);color:black}.group-B{background:var(--group-b);color:black}.group-C{background:var(--group-c);color:white}.group-D{background:var(--group-d);color:white}
+        .bonus-card{padding:14px;margin:10px 0;border-radius:12px;text-align:center;font-weight:700}
+        .podium{display:flex;justify-content:center;gap:14px;margin:18px 0;flex-wrap:wrap}
+        .podium-item{padding:12px;border-radius:12px;background:rgba(255,255,255,.03);min-width:140px;text-align:center}
+        .podium-1{background:linear-gradient(135deg,var(--group-a),#ffcc00);transform:scale(1.05)}
+        .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:10px}
+        .stat-card{background:linear-gradient(135deg,rgba(255,255,255,.06),rgba(255,255,255,.03));padding:14px;border-radius:12px;text-align:center}
+        .stat-value{font-size:1.6em;color:var(--primary);font-weight:700}
+        .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;align-items:center;justify-content:center}
+        .modal-content{background:rgba(255,255,255,.06);padding:18px;border-radius:12px;max-width:520px;width:92%;text-align:center}
+        .card-spinning{animation:spin 900ms linear}
+        @keyframes spin{0%{transform:rotateY(0)}50%{transform:rotateY(180deg)}100%{transform:rotateY(360deg)}}
+        @media (max-width:768px){h1{font-size:1.6em}.podium{flex-direction:column;align-items:center}.podium-item{width:100%;max-width:320px}}
     </style>
 </head>
-<body class="bg-slate-900 text-slate-200 antialiased">
+<body>
+    <div class="container">
+        <h1>🏁 Turniej Wyścigowy</h1>
+        <p class="subtitle">Manager turnieju gotowy na GitHub Pages — kwalifikacje → grupy → puchar</p>
 
-    <!-- Confirmation Modal -->
-    <div id="confirm-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
-        <div class="bg-slate-800 p-8 rounded-lg shadow-lg max-w-sm w-full border-2 border-red-600">
-            <p id="modal-message" class="text-center text-xl font-semibold mb-6">Are you sure?</p>
-            <div class="flex justify-end space-x-4">
-                <button id="confirm-cancel-btn" class="px-6 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-full font-bold transition-colors">Anuluj</button>
-                <button id="confirm-ok-btn" class="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-full font-bold transition-colors">Tak, zresetuj</button>
-            </div>
+        <div class="tabs">
+            <button class="tab active" data-tab="setup" onclick="showTab('setup', this)">📝 Uczestnicy</button>
+            <button class="tab" data-tab="qualifying" onclick="showTab('qualifying', this)">⏱️ Kwalifikacje</button>
+            <button class="tab" data-tab="groups" onclick="showTab('groups', this)">🎯 Eliminacje</button>
+            <button class="tab" data-tab="knockout" onclick="showTab('knockout', this)">🏆 Faza Pucharowa</button>
+            <button class="tab" data-tab="stats" onclick="showTab('stats', this)">📊 Statystyki</button>
         </div>
-    </div>
 
-    <!-- Card Draw Modal -->
-    <div id="card-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
-        <div class="bg-slate-800 p-8 rounded-lg shadow-lg max-w-sm w-full text-center">
-            <div id="card-animation-container" class="relative w-40 h-60 mx-auto mb-6 flex items-center justify-center"></div>
-            <div id="card-result" class="hidden">
-                <p class="text-2xl font-bold text-white mb-4">Wylosowano kartę:</p>
-                <img id="card-image-display" src="" alt="Wylosowana Karta" class="w-36 h-auto mx-auto rounded-lg mb-4">
-                <p id="card-name-display" class="text-4xl font-extrabold text-blue-400"></p>
-            </div>
-        </div>
-    </div>
-
-    <div class="container flex flex-col min-h-screen">
-        <!-- Header -->
-        <header class="text-center py-8">
-            <h1 class="text-4xl font-extrabold text-blue-500 tracking-wider">KAWALERKA RACING CHALLENGE</h1>
-            <p id="stage-title" class="text-xl font-semibold mt-2 text-slate-300"></p>
-            <p id="stage-description" class="text-sm italic text-slate-400 mt-1"></p>
-            <div class="mt-4 text-xs text-slate-500 flex justify-center space-x-4">
-                <span id="app-id-display"></span>
-                <span id="user-id-display"></span>
-            </div>
-        </header>
-
-        <main class="flex-grow flex flex-col items-center space-y-8">
-            <!-- Stage 1: Qualifications Section -->
-            <section id="qualifications-section" class="w-full">
-                <div class="bg-slate-800 p-6 rounded-lg shadow-xl mb-6 flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0 sm:space-x-4">
-                    <form id="player-form" class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 w-full">
-                        <input type="text" id="player-name" placeholder="Imię zawodnika" class="flex-grow px-4 py-2 bg-slate-900 border border-slate-700 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg">
-                        <button type="submit" class="w-full sm:w-auto px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold shadow-lg transition-colors">Dodaj Zawodnika</button>
-                    </form>
+        <!-- Setup -->
+        <div id="setup" class="tab-content active">
+            <div class="card">
+                <h2>Dodaj uczestników</h2>
+                <div class="input-group">
+                    <input id="driverName" type="text" placeholder="Imię kierowcy" onkeypress="if(event.key==='Enter') addDriver()" />
+                    <button onclick="addDriver()">Dodaj kierowcę</button>
                 </div>
-                <div id="stage1-table" class="bg-slate-800 p-6 rounded-lg shadow-xl overflow-x-auto"></div>
-                <div id="stage1-input-container"></div>
-            </section>
-            
-            <!-- Stage 2: Eliminations Section -->
-            <section id="eliminations-section" class="w-full">
-                <div id="stage2-container"></div>
-            </section>
-            
-            <!-- Stage 2.1: Elimination Podium Section -->
-            <section id="elimination-podium-section" class="w-full">
-                <!-- Content will be rendered by JS -->
-            </section>
+                <div id="driversList" class="drivers-list"></div>
+                <button onclick="startQualifying()" style="margin-top:16px;width:100%">Rozpocznij kwalifikacje →</button>
+            </div>
+        </div>
 
-            <!-- Bracket Section -->
-            <section id="bracket-section" class="w-full">
-                <div id="bracket-container"></div>
-            </section>
+        <!-- Qualifying -->
+        <div id="qualifying" class="tab-content">
+            <div class="card">
+                <h2>Kwalifikacje - Pomiar czasów</h2>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+                    <button onclick="randomizeOrder()">🎲 Losuj kolejność</button>
+                    <button onclick="finishQualifying()">Zakończ kwalifikacje i podziel na grupy →</button>
+                </div>
+                <div id="qualifyingList"></div>
+            </div>
+        </div>
 
-            <!-- Final Podium Section -->
-            <section id="final-podium-section" class="w-full">
-                <!-- Content will be rendered by JS -->
-            </section>
-        </main>
+        <!-- Groups -->
+        <div id="groups" class="tab-content">
+            <div class="card">
+                <h2>Eliminacje grupowe</h2>
+                <div style="display:flex;gap:8px;justify-content:center;margin-bottom:12px">
+                    <button class="group-stage-tab active" onclick="showGroupStage('times', this)">Czasy przejazdów</button>
+                    <button class="group-stage-tab" id="bonusTabButton" onclick="showGroupStage('bonuses', this)" disabled>Karty bonusowe</button>
+                    <button class="group-stage-tab" onclick="showGroupStage('podium', this)">Podium grup</button>
+                </div>
+                <div id="groupTimesDisplay" class="group-stage-content"></div>
+                <div id="groupBonusesDisplay" class="group-stage-content" style="display:none"></div>
+                <div id="groupPodiumDisplay" class="group-stage-content" style="display:none"></div>
+                <button onclick="startKnockout()" style="margin-top:12px;width:100%">Przejdź do fazy pucharowej →</button>
+            </div>
+        </div>
 
-        <!-- Action Buttons -->
-        <div class="py-8 flex justify-center space-x-4">
-            <button id="start-eliminations-btn" onclick="calculateQualifications()" class="hidden px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-full font-bold text-lg shadow-lg transition-colors transform hover:scale-105">
-                Rozpocznij Eliminacje
-            </button>
-            <button id="start-bracket-btn" onclick="finalizeEliminationsAndGoToPodium()" class="hidden px-8 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-full font-bold text-lg shadow-lg transition-colors transform hover:scale-105">
-                Przejdź do Drabinki
-            </button>
-            <button id="next-round-btn" onclick="advanceToNextRound()" class="hidden px-8 py-3 bg-yellow-500 hover:bg-yellow-600 text-slate-900 rounded-full font-bold text-lg shadow-lg transition-colors transform hover:scale-105">
-                Następna Runda
-            </button>
-            <button id="reset-btn" onclick="resetEvent()" class="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-full font-bold shadow-lg transition-colors">
-                Zresetuj Imprezę
-            </button>
+        <!-- Knockout -->
+        <div id="knockout" class="tab-content">
+            <div class="card">
+                <h2>Faza Pucharowa</h2>
+                <div id="tournamentBracket"></div>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div id="stats" class="tab-content">
+            <div class="card">
+                <h2>Statystyki turnieju</h2>
+                <div id="tournamentStats" class="stats"></div>
+                <div id="finalPodium"></div>
+                <div id="finalWinner"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="bonusCardModal" class="modal">
+        <div class="modal-content">
+            <h2 id="bonusCardTitle">Karta Bonusowa</h2>
+            <div id="bonusCardIcon" style="font-size:3.6em;margin:14px 0"></div>
+            <p id="bonusCardDescription"></p>
+            <div id="bonusCardStats" style="margin:12px 0;padding:10px;background:rgba(0,0,0,.18);border-radius:8px"></div>
+            <div style="display:flex;gap:10px;justify-content:center;margin-top:10px">
+                <button onclick="closeBonusCardModal()">Zamknij</button>
+            </div>
         </div>
     </div>
+
+    <script>
+        // Aplikacja - prosty, serializowalny stan
+        let appState = {
+            drivers: [],
+            stage: 'setup',
+            groups: { A: [], B: [], C: [], D: [] },
+            knockoutBracket: [],
+            finalStandings: [],
+            bonusCards: [
+                { name: 'Turbo', effect: -1.5, target: 'worse', type: 'positive', icon: '🚀', description: 'Odejmij 1.5s od gorszego przejazdu' },
+                { name: 'Nitro', effect: -2, target: 'worse', type: 'positive', icon: '💨', description: 'Odejmij 2s od gorszego przejazdu' },
+                { name: 'Czysta linia', effect: 'repeat', type: 'positive', icon: '🎯', description: 'Powtórz przejazd i wybierz lepszy wynik' },
+                { name: 'Lepsze opony', effect: 0.98, target: 'better_multiply', type: 'positive', icon: '🛞', description: 'Czas lepszego przejazdu x0.98' },
+                { name: 'Lepsze paliwo', effect: -1, target: 'worse', type: 'positive', icon: '⛽', description: 'Odejmij 1s od gorszego przejazdu' },
+                { name: 'Perfekcyjny start', effect: -2.137, target: 'worse', type: 'positive', icon: '🏁', description: 'Odejmij 2.137s od gorszego przejazdu' },
+                { name: 'Złapałeś kapcia', effect: 2, target: 'better', type: 'negative', icon: '👟', description: 'Dodaj 2s do lepszego przejazdu' },
+                { name: 'Śliska nawierzchnia', effect: 1.5, target: 'better', type: 'negative', icon: '🌧️', description: 'Dodaj 1.5s do lepszego przejazdu' },
+                { name: 'Pechowy zakręt', effect: 2.5, target: 'worse', type: 'negative', icon: '🔄', description: 'Dodaj 2.5s do gorszego przejazdu' },
+                { name: 'Zmęczenie', effect: 1.69, target: 'better', type: 'negative', icon: '😴', description: 'Dodaj 1.69s do lepszego przejazdu' },
+                { name: 'Pechowy driver', effect: 'worst', type: 'negative', icon: '💀', description: 'Lepszy czas zostaje zamieniony na wartość najgorszego czasu w tabeli' },
+                { name: 'Pit stop', effect: 1.02, target: 'worse_multiply', type: 'negative', icon: '🔧', description: 'Czas gorszego przejazdu x1.02' }
+            ],
+            groupStage: 'times'
+        };
+
+        // Load / Save
+        function loadState(){
+            try{
+                const raw = localStorage.getItem('racingTournament');
+                if(!raw) return;
+                const parsed = JSON.parse(raw);
+                // Basic compatibility/fallbacks
+                appState = Object.assign(appState, parsed);
+                // ensure arrays exist
+                appState.groups = appState.groups || {A:[],B:[],C:[],D:[]};
+                updateAllDisplays();
+            }catch(e){console.warn('Failed to load state', e)}
+        }
+        function saveState(){
+            localStorage.setItem('racingTournament', JSON.stringify(appState));
+            // subtle visual feedback
+            const n = document.getElementById('saveNotification');
+            if(n){n.style.display='block';setTimeout(()=>n.style.display='none',1200)}
+        }
+
+        // Helpers
+        function findDriverById(id){return appState.drivers.find(d=>d.id===id)}
+
+        // UI: Tabs
+        function showTab(tabName, btn){
+            document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+            if(btn) btn.classList.add('active');
+            const el = document.getElementById(tabName);
+            if(el) el.classList.add('active');
+            updateAllDisplays();
+        }
+
+        // Group stage tab
+        function showGroupStage(stage, btn){
+            appState.groupStage = stage;
+            document.querySelectorAll('.group-stage-tab').forEach(t=>t.classList.remove('active'));
+            if(btn) btn.classList.add('active');
+            document.querySelectorAll('.group-stage-content').forEach(c=>c.style.display='none');
+            if(stage==='times') document.getElementById('groupTimesDisplay').style.display='block';
+            if(stage==='bonuses') { document.getElementById('groupBonusesDisplay').style.display='block'; updateBonusesDisplay(); }
+            if(stage==='podium') { document.getElementById('groupPodiumDisplay').style.display='block'; updatePodiumDisplay(); }
+            saveState();
+        }
+
+        // Drivers management
+        function addDriver(){
+            const input = document.getElementById('driverName');
+            const name = input.value.trim();
+            if(!name) return;
+            if(appState.drivers.some(d=>d.name===name)){
+                alert('Kierowca o takiej nazwie już istnieje');
+                return;
+            }
+            const driver = { id: Date.now()+Math.floor(Math.random()*1000), name, qualifyingTime1:null, qualifyingTime2:null, avgTime:null, group:null, groupTime1:null, groupTime2:null, repeatedTime:null, bonusCard:null, finalGroupTime:null, originalAvgTime:null };
+            appState.drivers.push(driver);
+            input.value='';
+            updateDriversList();
+            saveState();
+        }
+        function removeDriver(id){
+            if(!confirm('Usuń kierowcę?')) return;
+            appState.drivers = appState.drivers.filter(d=>d.id!==id);
+            updateDriversList();
+            saveState();
+        }
+        function updateDriversList(){
+            const list = document.getElementById('driversList');
+            list.innerHTML = appState.drivers.map(d=>`<div class="driver-item"><span>${escapeHtml(d.name)}</span><div><button onclick="removeDriver(${d.id})" style="background:var(--danger)">Usuń</button></div></div>`).join('') || '<div class="card">Brak zawodników — dodaj minimum 4</div>';
+        }
+
+        // Qualifying
+        function randomizeOrder(){
+            appState.drivers = shuffleArray(appState.drivers);
+            updateQualifyingList();
+            saveState();
+        }
+        function updateQualifyingList(){
+            const list = document.getElementById('qualifyingList');
+            if(!appState.drivers.length) { list.innerHTML='<div class="card">Brak zawodników</div>'; return }
+            list.innerHTML = appState.drivers.map((driver, idx)=>{
+                return `<div class="driver-item"><span>${idx+1}. ${escapeHtml(driver.name)}</span><div style="display:flex;gap:8px;align-items:center"><input type="number" class="time-input" placeholder="Czas 1" step="0.01" min="0" value="${driver.qualifyingTime1==null?'':driver.qualifyingTime1}" onchange="updateQualifyingTime(${driver.id},1,this.value)"><input type="number" class="time-input" placeholder="Czas 2" step="0.01" min="0" value="${driver.qualifyingTime2==null?'':driver.qualifyingTime2}" onchange="updateQualifyingTime(${driver.id},2,this.value)"><span style="min-width:110px;text-align:right">${driver.avgTime?`Średnia: ${driver.avgTime.toFixed(2)}s`:''}</span></div></div>`
+            }).join('');
+        }
+        function updateQualifyingTime(id, run, value){
+            const driver = findDriverById(id); if(!driver) return;
+            const v = parseFloat(value); if(isNaN(v)||v<0) return;
+            if(run===1) driver.qualifyingTime1 = v; if(run===2) driver.qualifyingTime2 = v;
+            if(driver.qualifyingTime1!=null && driver.qualifyingTime2!=null) driver.avgTime = (driver.qualifyingTime1+driver.qualifyingTime2)/2;
+            updateQualifyingList(); saveState();
+        }
+        function startQualifying(){
+            if(appState.drivers.length<4){ alert('Potrzebujesz minimum 4 kierowców!'); return }
+            appState.stage='qualifying'; showTab('qualifying', document.querySelector('[data-tab="qualifying"]'));
+            updateQualifyingList();
+        }
+
+        // Finish qualifying and split groups
+        function finishQualifying(){
+            if(appState.drivers.some(d=>d.avgTime==null)){ alert('Nie wszyscy mają wpisane czasy kwalifikacji'); return }
+            const sorted = [...appState.drivers].sort((a,b)=>a.avgTime-b.avgTime);
+            const total = sorted.length; const groupSize = Math.ceil(total/4);
+            appState.groups.A = sorted.slice(0,groupSize).map(cloneDriverForGroup);
+            appState.groups.B = sorted.slice(groupSize,groupSize*2).map(cloneDriverForGroup);
+            appState.groups.C = sorted.slice(groupSize*2,groupSize*3).map(cloneDriverForGroup);
+            appState.groups.D = sorted.slice(groupSize*3).map(cloneDriverForGroup);
+            ['A','B','C','D'].forEach(g=>{ appState.groups[g].forEach(d=>{ d.group=g; const main = appState.drivers.find(x=>x.id===d.id); if(main){ main.group=g } }) });
+            appState.stage='groups'; showTab('groups', document.querySelector('[data-tab="groups"]'));
+            updateGroupsDisplay(); saveState();
+        }
+        function cloneDriverForGroup(d){
+            // we will reference main driver object by id — keep minimal copy
+            return { id: d.id, name: d.name, avgTime: d.avgTime, groupTime1:null, groupTime2:null, repeatedTime:null, bonusCard:null, finalGroupTime:null, originalAvgTime:null };
+        }
+
+        // Groups display
+        function updateGroupsDisplay(){
+            const display = document.getElementById('groupTimesDisplay');
+            display.innerHTML = ['A','B','C','D'].map(group=>{
+                const groupName = {A:'Zapierdalacze',B:'Średni (Super)',C:'Niedzielni',D:'Zaślimaczeni'}[group];
+                const list = (appState.groups[group]||[]).map(driver=>{
+                    // sync group times from main driver if present
+                    const main = appState.drivers.find(d=>d.id===driver.id);
+                    if(main){ driver.groupTime1 = driver.groupTime1 ?? main.groupTime1 ?? null; driver.groupTime2 = driver.groupTime2 ?? main.groupTime2 ?? null }
+                    return `<div class="driver-item" style="margin:8px 0"><span>${escapeHtml(driver.name)} (Śr. kwal: ${driver.avgTime?driver.avgTime.toFixed(2):'—'}s)</span><div style="display:flex;gap:8px;align-items:center"><input type="number" class="time-input" placeholder="Czas 1" step="0.01" min="0" value="${driver.groupTime1==null?'':driver.groupTime1}" onchange="updateGroupTime(${driver.id},1,this.value)"><input type="number" class="time-input" placeholder="Czas 2" step="0.01" min="0" value="${driver.groupTime2==null?'':driver.groupTime2}" onchange="updateGroupTime(${driver.id},2,this.value)"></div></div>`
+                }).join('') || '<div class="card">Brak zawodników w tej grupie</div>';
+                return `<div class="card"><h3>Grupa ${group} - ${groupName} <span class="group-badge group-${group}">${group}</span></h3>${list}</div>`
+            }).join('');
+            // enable bonuses tab only when all group times for drivers in groups are filled
+            const allInGroups = ['A','B','C','D'].flatMap(g=>appState.groups[g]||[]);
+            const allTimesEntered = allInGroups.length>0 && allInGroups.every(d=>d.groupTime1!=null && d.groupTime2!=null);
+            const bonusBtn = document.getElementById('bonusTabButton'); if(bonusBtn) bonusBtn.disabled = !allTimesEntered;
+        }
+
+        // Update group time (stores both on main driver and group copy)
+        function updateGroupTime(id, run, value){
+            const v = parseFloat(value); if(isNaN(v)||v<0) return;
+            // update main driver
+            const main = appState.drivers.find(d=>d.id===id);
+            if(!main) return;
+            if(run===1) main.groupTime1 = v; if(run===2) main.groupTime2 = v;
+            if(main.groupTime1!=null && main.groupTime2!=null && !main.originalAvgTime) main.originalAvgTime = (main.groupTime1+main.groupTime2)/2;
+            // update group copy
+            ['A','B','C','D'].forEach(g=>{ const copy = (appState.groups[g]||[]).find(x=>x.id===id); if(copy){ if(run===1) copy.groupTime1 = v; if(run===2) copy.groupTime2 = v } });
+            updateGroupsDisplay(); saveState();
+        }
+
+        // Bonuses display and logic
+        function updateBonusesDisplay(){
+            const display = document.getElementById('groupBonusesDisplay');
+            display.innerHTML = ['A','B','C','D'].map(group=>{
+                const groupName = {A:'Zapierdalacze',B:'Średni (Super)',C:'Niedzielni',D:'Zaślimaczeni'}[group];
+                const list = (appState.groups[group]||[]).map(driver=>{
+                    const main = appState.drivers.find(d=>d.id===driver.id);
+                    const gt1 = main?.groupTime1 ?? driver.groupTime1; const gt2 = main?.groupTime2 ?? driver.groupTime2;
+                    const avg = (gt1!=null && gt2!=null) ? ((gt1+gt2)/2).toFixed(2) : '—';
+                    const btnLabel = main?.bonusCard ? `${escapeHtml(main.bonusCard.name)}` : '🎰 Losuj kartę';
+                    return `<div class="driver-item" style="margin:8px 0"><div><div>${escapeHtml(driver.name)}</div><div style="font-size:.85em;color:#aaa;margin-top:6px">Czasy: ${gt1!=null?gt1.toFixed(2)+'s':'—'}, ${gt2!=null?gt2.toFixed(2)+'s':'—'} | Średnia: ${avg}</div></div><div style="display:flex;gap:8px;align-items:center"><button onclick="drawBonusCard(${driver.id})" ${main && main.bonusCard? 'disabled':''}>${btnLabel}</button></div>${main && main.bonusCard?`<div style="margin-top:8px;padding:8px;background:rgba(0,0,0,.15);border-radius:8px"><div>Bonus: ${escapeHtml(main.bonusCard.name)}</div><div>Nowy czas: <strong>${main.finalGroupTime!=null?main.finalGroupTime.toFixed(2)+'s':'—'}</strong></div></div>`:''}${main && main.bonusCard && main.bonusCard.effect==='repeat' && main.repeatedTime==null?`<div class="repeat-time-input" style="margin-top:8px"><span style="margin-right:8px">Czas powtórzonego przejazdu:</span><input type="number" class="time-input" step="0.01" min="0" placeholder="Czas powtórzenia" onchange="updateRepeatedTime(${driver.id},this.value)"></div>`:''}</div>`
+                }).join('') || '<div class="card">Brak zawodników w tej grupie</div>';
+                return `<div class="card"><h3>Grupa ${group} - ${groupName} <span class="group-badge group-${group}">${group}</span></h3>${list}</div>`
+            }).join('');
+        }
+
+        function updateRepeatedTime(id, value){
+            const v = parseFloat(value); if(isNaN(v)||v<0) return; const main = findDriverById(id); if(!main) return; main.repeatedTime = v; calculateFinalGroupTime(main); updateBonusesDisplay(); saveState();
+        }
+
+        function drawBonusCard(id){
+            const main = findDriverById(id); if(!main) return; if(main.groupTime1==null || main.groupTime2==null){ alert('Najpierw wpisz oba czasy!'); return }
+            const card = appState.bonusCards[Math.floor(Math.random()*appState.bonusCards.length)];
+            main.bonusCard = card;
+            if(!main.originalAvgTime) main.originalAvgTime = (main.groupTime1+main.groupTime2)/2;
+            calculateFinalGroupTime(main);
+            showBonusCardAnimation(card, main);
+            updateBonusesDisplay(); saveState();
+        }
+
+        function showBonusCardAnimation(card, driver){
+            const modal = document.getElementById('bonusCardModal');
+            document.getElementById('bonusCardTitle').textContent = card.name + ' ' + (card.icon||'');
+            const iconEl = document.getElementById('bonusCardIcon'); iconEl.textContent = card.icon || '';
+            iconEl.classList.add('card-spinning');
+            document.getElementById('bonusCardDescription').textContent = `${driver.name} wylosował: ${card.description}`;
+            const originalAvg = driver.originalAvgTime ?? ((driver.groupTime1+driver.groupTime2)/2);
+            const newAvg = driver.finalGroupTime ?? originalAvg;
+            const diff = (newAvg - originalAvg).toFixed(2);
+            document.getElementById('bonusCardStats').innerHTML = `<div>Średnia przed bonusem: <strong>${originalAvg.toFixed(2)}s</strong></div><div>Średnia po bonusie: <strong>${newAvg.toFixed(2)}s</strong></div><div>Różnica: <strong style="color:${newAvg<originalAvg? '#4CAF50':'#f44336'}">${diff}s</strong></div>`;
+            modal.style.display='flex'; setTimeout(()=>iconEl.classList.remove('card-spinning'),900);
+        }
+        function closeBonusCardModal(){ document.getElementById('bonusCardModal').style.display='none' }
+
+        // Calculate final group time based on card
+        function calculateFinalGroupTime(driver){
+            if(driver.groupTime1==null || driver.groupTime2==null) return;
+            let t1 = driver.groupTime1, t2 = driver.groupTime2;
+            let better = Math.min(t1,t2), worse = Math.max(t1,t2);
+            if(driver.bonusCard){ const card = driver.bonusCard; switch(card.effect){
+                case 'repeat':
+                    if(driver.repeatedTime!=null){ better = Math.min(better, driver.repeatedTime); worse = Math.max(better, driver.repeatedTime); }
+                    // final is average of better + worse
+                    driver.finalGroupTime = (better + worse)/2; break;
+                case 'worst':
+                    // set better to current worst time across all drivers
+                    const allWorst = appState.drivers.filter(d=>d.groupTime1!=null && d.groupTime2!=null).map(d=>Math.max(d.groupTime1,d.groupTime2));
+                    if(allWorst.length) better = Math.max(...allWorst);
+                    driver.finalGroupTime = (better + worse)/2; break;
+                default:
+                    if(card.target === 'worse') worse += card.effect;
+                    else if(card.target === 'better') better += card.effect;
+                    else if(card.target === 'better_multiply') better *= card.effect;
+                    else if(card.target === 'worse_multiply') worse *= card.effect;
+                    driver.finalGroupTime = (better + worse)/2; break;
+            }} else { driver.finalGroupTime = (t1 + t2)/2 }
+        }
+
+        // Knockout: build bracket using group rankings
+        function startKnockout(){
+            // Ensure all drivers in groups have finalGroupTime
+            const allAssigned = ['A','B','C','D'].flatMap(g=>appState.groups[g]||[]);
+            if(allAssigned.length===0){ alert('Brak zawodników w grupach'); return }
+            const anyMissing = allAssigned.some(d=>{
+                const main = findDriverById(d.id); return !main || main.finalGroupTime==null;
+            });
+            if(anyMissing){ alert('Wszyscy zawodnicy muszą mieć wylosowaną kartę i obliczony czas'); return }
+            // Sort groups
+            ['A','B','C','D'].forEach(g=>{
+                appState.groups[g].sort((x,y)=>{
+                    const ax = (findDriverById(x.id)?.finalGroupTime) ?? ((x.groupTime1+x.groupTime2)/2);
+                    const by = (findDriverById(y.id)?.finalGroupTime) ?? ((y.groupTime1+y.groupTime2)/2);
+                    return ax - by;
+                });
+            });
+            // Build first 1vs1 round as requested
+            const make = (a,b,name)=>({name,drivers:[a,b]});
+            const matches = [];
+            if(appState.groups.A[0] && appState.groups.B[0]) matches.push(make(appState.groups.A[0],appState.groups.B[0],'1 miejsce A vs B'));
+            if(appState.groups.C[0] && appState.groups.D[0]) matches.push(make(appState.groups.C[0],appState.groups.D[0],'1 miejsce C vs D'));
+            if(appState.groups.A[1] && appState.groups.B[1]) matches.push(make(appState.groups.A[1],appState.groups.B[1],'2 miejsce A vs B'));
+            if(appState.groups.C[1] && appState.groups.D[1]) matches.push(make(appState.groups.C[1],appState.groups.D[1],'2 miejsce C vs D'));
+            if(appState.groups.A[2] && appState.groups.B[2]) matches.push(make(appState.groups.A[2],appState.groups.B[2],'3 miejsce A vs B'));
+            if(appState.groups.C[2] && appState.groups.D[2]) matches.push(make(appState.groups.C[2],appState.groups.D[2],'3 miejsce C vs D'));
+            appState.knockoutBracket = [{round:'1vs1', matches: matches.map(m=>({ ...m, winner:null }))}];
+            appState.knockoutBracket[0].matches.forEach(m=>{
+                m.drivers = m.drivers.filter(Boolean);
+                if(m.drivers.length === 1){
+                    m.winner = m.drivers[0].id;
+                }
+            });
+            showTab('knockout', document.querySelector('[data-tab=\"knockout\"]'));
+            updateKnockoutBracket(); 
+            saveState();
+        }
+
+        function updateKnockoutBracket(){
+            const el = document.getElementById('tournamentBracket');
+            if(!appState.knockoutBracket || !appState.knockoutBracket.length){ el.innerHTML='<div class="card">Brak drabinki</div>'; return }
+            el.innerHTML = appState.knockoutBracket.map((round,ri)=>{
+            const matchesHtml = (round.matches||[]).map((m,mi)=>{
+            const driversHtml = (m.drivers||[]).map(driver=>{
+            if(!driver) return '<div class="match-driver">TBD</div>';
+            const main = findDriverById(driver.id) || driver;
+            const val = main.matchTimes?.[round.round] ?? '';
+            return `<div class="match-driver ${m.winner===main.id? 'winner':''}" style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-radius:8px;background:rgba(0,0,0,.12)"><span>${escapeHtml(main.name)}</span><div><input type="number" class="time-input" placeholder="Czas wyścigu" step="0.01" min="0" value="${val}" onchange="updateMatchTime(${ri},${mi},${main.id},'${round.round}',this.value)">${m.winner===main.id? ' 🏆':''}</div></div>`
+            }).join('');
+            return `<div class="match"><div class="match-header" style="font-weight:700;color:var(--primary);margin-bottom:8px">${escapeHtml(m.name)}</div><div class="match-drivers" style="display:grid;gap:8px">${driversHtml}</div></div>`
+            }).join('');
+            let btns = '';
+            if(round.round==='1vs1' && round.matches.filter(m=>m.drivers.length>=1).every(m=>m.winner)) btns = `<button onclick="generateQuarterFinals()" style="margin-top:12px;width:100%">Przejdź dalej →</button>`;
+            if(round.round==='Ćwierćfinały' && round.matches.filter(m=>m.drivers.length>=1).every(m=>m.winner)) btns = `<button onclick="generateSemiFinals()" style="margin-top:12px;width:100%">Przejdź dalej →</button>`;
+            if(round.round==='Półfinały' && round.matches.filter(m=>m.drivers.length>=1).every(m=>m.winner)) btns = `<button onclick="generateFinal()" style="margin-top:12px;width:100%">Przejdź dalej →</button>`;
+            if(round.round==='FINAŁ' && round.matches.filter(m=>m.drivers.length>=1).every(m=>m.winner)) btns = `<button onclick="finishTournament()" style="margin-top:12px;width:100%">Zakończ turniej →</button>`;
+            return `<div class="card"><h3>${escapeHtml(round.round)}</h3><div class="bracket">${matchesHtml}</div>${btns}</div>`
+            }).join('');
+        }
+
+        function updateMatchTime(roundIdx, matchIdx, driverId, roundName, value){
+            const r = appState.knockoutBracket[roundIdx]; if(!r) return;
+            const m = r.matches[matchIdx]; if(!m) return;
+            const driver = m.drivers.find(d=>d.id===driverId); if(!driver) return;
+            const main = findDriverById(driverId) || driver;
+            const v = parseFloat(value); if(isNaN(v)||v<0) return;
+            if(!main.matchTimes) main.matchTimes = {};
+            main.matchTimes[roundName] = v;
+            if(!driver.matchTimes) driver.matchTimes = {};
+            driver.matchTimes[roundName] = v;
+            if(m.drivers.every(d=>d.matchTimes && d.matchTimes[roundName]!=null)){
+            const winner = m.drivers.reduce((a,b)=> a.matchTimes[roundName] < b.matchTimes[roundName] ? a : b);
+            m.winner = winner.id;
+            }
+            updateKnockoutBracket();
+            saveState();
+        }
+
+
+        function generateQuarterFinals(){
+            const last = appState.knockoutBracket.at(-1);
+            const winners = last.matches.filter(m=>m.winner).map(m=> m.drivers.find(d=>d.id===m.winner));
+            if(winners.length < 2){ alert('Najpierw zakończ mecze 1vs1!'); return }
+
+
+            if(winners.length === 2){
+            appState.knockoutBracket.push({
+            round: 'FINAŁ',
+            matches: [{name:'Finał', drivers:[winners[0], winners[1]], winner:null}]
+            });
+            } else {
+            const matches = [];
+            for(let i=0;i<winners.length;i+=2){
+            if(winners[i+1]) matches.push({name:`Ćwierćfinał ${matches.length+1}`, drivers:[winners[i], winners[i+1]], winner:null});
+            else matches.push({name:`Ćwierćfinał ${matches.length+1}`, drivers:[winners[i]], winner:winners[i].id});
+            }
+            appState.knockoutBracket.push({ round:'Ćwierćfinały', matches });
+            }
+
+
+            updateKnockoutBracket(); saveState();
+        }
+        function generateSemiFinals(){
+            const last = appState.knockoutBracket.at(-1);
+            const winners = last.matches.filter(m=>m.winner).map(m=> m.drivers.find(d=>d.id===m.winner));
+            if(winners.length < 2){ alert('Najpierw zakończ ćwierćfinały!'); return }
+
+
+            if(winners.length === 2){
+            appState.knockoutBracket.push({
+            round: 'FINAŁ',
+            matches: [{name:'Finał', drivers:[winners[0], winners[1]], winner:null}]
+            });
+            } else {
+            const matches = [];
+            for(let i=0;i<winners.length;i+=2){
+            if(winners[i+1]) matches.push({name:`Półfinał ${matches.length+1}`, drivers:[winners[i], winners[i+1]], winner:null});
+            else matches.push({name:`Półfinał ${matches.length+1}`, drivers:[winners[i]], winner:winners[i].id});
+            }
+            appState.knockoutBracket.push({ round:'Półfinały', matches });
+            }
+
+
+            updateKnockoutBracket(); saveState();
+        }
+        function generateFinal(){
+            const last = appState.knockoutBracket.at(-1);
+            const winners = last.matches.filter(m=>m.winner).map(m=> m.drivers.find(d=>d.id===m.winner));
+            if(winners.length < 1){ alert('Najpierw zakończ półfinały!'); return }
+
+
+            if(winners.length === 1){
+            appState.knockoutBracket.push({ round:'FINAŁ', matches:[{name:'Finał', drivers:[winners[0]], winner:winners[0].id}] });
+            } else {
+            appState.knockoutBracket.push({ round:'FINAŁ', matches:[{name:'Finał', drivers:[winners[0], winners[1]], winner:null}] });
+            }
+
+
+            updateKnockoutBracket(); saveState();
+        }
+
+        function finishTournament(){
+            const finalRound = appState.knockoutBracket[appState.knockoutBracket.length-1]; if(!finalRound) return;
+            const finalMatch = finalRound.matches[0]; if(!finalMatch || !finalMatch.winner){ alert('Najpierw zakończ finał!'); return }
+            const winner = finalMatch.drivers.find(d=>d.id===finalMatch.winner); const loser = finalMatch.drivers.find(d=>d.id!==finalMatch.winner);
+            // find 3rd place from semi-final losers (simple approach)
+            const semi = appState.knockoutBracket.find(r=>r.round==='Półfinały');
+            const third = (semi && semi.matches[0]) ? semi.matches[0].drivers.find(d=>d.id!==semi.matches[0].winner) : null;
+            appState.finalStandings = [{position:1,driver:winner},{position:2,driver:loser},{position:3,driver:third}].filter(Boolean);
+            showTab('stats', document.querySelector('[data-tab="stats"]'));
+            updateStats(); saveState();
+        }
+
+        function updateStats(){
+            const stats = document.getElementById('tournamentStats');
+            const allTimes = appState.drivers.filter(d=>d.avgTime!=null).map(d=>d.avgTime);
+            if(allTimes.length===0){ stats.innerHTML = '<div class="card">Brak danych kwalifikacji</div>'; return }
+            const fastest = Math.min(...allTimes); const slowest = Math.max(...allTimes); const avg = allTimes.reduce((a,b)=>a+b,0)/allTimes.length;
+            stats.innerHTML = `<div class="stat-card"><div class="stat-label">Liczba kierowców</div><div class="stat-value">${appState.drivers.length}</div></div><div class="stat-card"><div class="stat-label">Najszybszy czas kwalifikacji</div><div class="stat-value">${fastest.toFixed(2)}s</div></div><div class="stat-card"><div class="stat-label">Najwolniejszy czas kwalifikacji</div><div class="stat-value">${slowest.toFixed(2)}s</div></div><div class="stat-card"><div class="stat-label">Średni czas kwalifikacji</div><div class="stat-value">${avg.toFixed(2)}s</div></div>`;
+            // Final podium
+            const fp = document.getElementById('finalPodium'); const fw = document.getElementById('finalWinner');
+            if(appState.finalStandings && appState.finalStandings.length){
+                fp.innerHTML = `<div class="card"><h2 style="text-align:center">🏆 KOŃCOWE PODIUM 🏆</h2><div class="podium">${appState.finalStandings.map(s=>`<div class="podium-item podium-${s.position}"><div style="font-size:1.6em">${s.position===1? '🥇': s.position===2? '🥈':'🥉'}</div><div style="font-weight:700;font-size:1.05em">${escapeHtml(s.driver.name)}</div><div>Grupa ${escapeHtml(s.driver.group||'—')}</div></div>`).join('')}</div></div>`;
+                const champ = appState.finalStandings[0].driver; fw.innerHTML = `<div class="card" style="text-align:center;background:linear-gradient(135deg,var(--group-a),var(--warning));margin-top:10px"><div style="font-size:2.2em">🏆</div><h2 style="margin:8px 0">ZWYCIĘZCA TURNIEJU</h2><h3 style="font-size:1.6em">${escapeHtml(champ.name)}</h3><p>Grupa ${escapeHtml(champ.group||'—')}</p></div>`;
+            } else { fp.innerHTML=''; fw.innerHTML=''; }
+        }
+
+        // Utility functions
+        function shuffleArray(a){ return a.sort(()=>Math.random()-0.5) }
+        function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"})[c]) }
+
+        // updateAll
+        function updateAllDisplays(){ updateDriversList(); updateQualifyingList(); if(appState.stage==='groups'){ if(appState.groupStage==='times') updateGroupsDisplay(); if(appState.groupStage==='bonuses') updateBonusesDisplay(); if(appState.groupStage==='podium') updatePodiumDisplay(); } updateKnockoutBracket(); updateStats(); }
+
+        // small podium display used in groups
+        function updatePodiumDisplay(){
+            const display = document.getElementById('groupPodiumDisplay');
+            display.innerHTML = ['A','B','C','D'].map(group=>{
+                const groupName = {A:'Zapierdalacze',B:'Średni (Super)',C:'Niedzielni',D:'Zaślimaczeni'}[group];
+                const drivers = (appState.groups[group]||[]).slice();
+                drivers.forEach(d=>{ const main = findDriverById(d.id); if(main){ d.final = main.finalGroupTime ?? ((d.groupTime1!=null && d.groupTime2!=null)? (d.groupTime1+d.groupTime2)/2 : null) } });
+                drivers.sort((a,b)=> (a.final??9999) - (b.final??9999));
+                const podium = drivers.slice(0,3).map((d,i)=>`<div class="podium-item podium-${i+1}"><div style="font-size:1.2em">${i===0?'🥇':i===1?'🥈':'🥉'}</div><div style="font-weight:700">${escapeHtml(d.name)}</div><div>${d.final? d.final.toFixed(2)+'s':'—'}</div></div>`).join('');
+                const rest = drivers.slice(3).map(d=>`<div class="driver-item" style="margin:6px 0"><span>${escapeHtml(d.name)}</span><span>${d.final? d.final.toFixed(2)+'s':'—'}</span></div>`).join('');
+                return `<div class="card"><h3>Grupa ${group} - ${groupName} <span class="group-badge group-${group}">${group}</span></h3><div class="podium">${podium}</div>${rest?`<div style="margin-top:10px"><h4>Pozostali:</h4>${rest}</div>`:''}</div>`
+            }).join('');
+        }
+
+        // init
+        window.addEventListener('load', ()=>{
+            loadState();
+            // add reset button
+            const container = document.querySelector('.container');
+            const resetBtn = document.createElement('button'); resetBtn.textContent='🔄 Reset turnieju'; resetBtn.style.cssText='background:var(--danger);margin-top:12px'; resetBtn.onclick=()=>{ if(confirm('Czy na pewno?')){ localStorage.removeItem('racingTournament'); location.reload() } };
+            container.appendChild(resetBtn);
+        });
+    </script>
 </body>
 </html>
