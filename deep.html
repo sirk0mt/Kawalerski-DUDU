@@ -47,6 +47,19 @@
         @keyframes spin{0%{transform:rotateY(0)}50%{transform:rotateY(180deg)}100%{transform:rotateY(360deg)}}
         @media (max-width:768px){h1{font-size:1.6em}.podium{flex-direction:column;align-items:center}.podium-item{width:100%;max-width:320px}}
         .stopwatch-btn { padding: 6px 10px; margin-left: 5px; }
+        .stopwatch-display {
+            display: inline-block;
+            min-width: 80px;
+            text-align: center;
+            font-family: monospace;
+            font-size: 1.1em;
+            font-weight: bold;
+            color: var(--primary);
+            background: rgba(0, 0, 0, 0.3);
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-left: 8px;
+        }
         .tournament-bracket {
             display: flex;
             flex-direction: column;
@@ -283,12 +296,15 @@
             currentRun: null,
             currentType: null,
             currentInput: null,
-            currentButton: null
+            currentButton: null,
+            displayElement: null,
+            intervalId: null
         };
 
         // Dodano funkcje obsługi stopera
         function toggleStopwatch(driverId, run, type, buttonElement) {
             const input = buttonElement.previousElementSibling;
+            
             if (stopwatch.isRunning && stopwatch.currentDriverId === driverId && stopwatch.currentRun === run && stopwatch.currentType === type) {
                 stopStopwatch();
             } else {
@@ -298,6 +314,16 @@
                         stopwatch.currentButton.textContent = '⏱️';
                     }
                 }
+                
+                // Utwórz lub znajdź element wyświetlacza
+                let displayEl = buttonElement.nextElementSibling;
+                if (!displayEl || !displayEl.classList.contains('stopwatch-display')) {
+                    displayEl = document.createElement('span');
+                    displayEl.className = 'stopwatch-display';
+                    displayEl.textContent = '0.00';
+                    buttonElement.parentNode.insertBefore(displayEl, buttonElement.nextSibling);
+                }
+                
                 stopwatch.isRunning = true;
                 stopwatch.startTime = Date.now();
                 stopwatch.currentDriverId = driverId;
@@ -305,27 +331,54 @@
                 stopwatch.currentType = type;
                 stopwatch.currentInput = input;
                 stopwatch.currentButton = buttonElement;
+                stopwatch.displayElement = displayEl;
+                
                 buttonElement.textContent = '⏹️';
+                
+                // Uruchom aktualizację wyświetlacza
+                stopwatch.intervalId = setInterval(() => {
+                    if (stopwatch.isRunning && stopwatch.displayElement) {
+                        const elapsed = (Date.now() - stopwatch.startTime) / 1000;
+                        stopwatch.displayElement.textContent = elapsed.toFixed(2);
+                    }
+                }, 10); // Aktualizuj co 10ms
             }
         }
 
         function stopStopwatch() {
             if (!stopwatch.isRunning) return;
+            
             const elapsed = (Date.now() - stopwatch.startTime) / 1000;
             stopwatch.isRunning = false;
+            
+            // Wyczyść interval
+            if (stopwatch.intervalId) {
+                clearInterval(stopwatch.intervalId);
+                stopwatch.intervalId = null;
+            }
+            
             if (stopwatch.currentInput) {
                 stopwatch.currentInput.value = elapsed.toFixed(2);
                 const event = new Event('change');
                 stopwatch.currentInput.dispatchEvent(event);
             }
+            
             if (stopwatch.currentButton) {
                 stopwatch.currentButton.textContent = '⏱️';
             }
+            
+            // Ukryj lub zresetuj wyświetlacz
+            if (stopwatch.displayElement) {
+                stopwatch.displayElement.textContent = '0.00';
+            }
+            
+            // Resetuj stan stopera
             stopwatch.currentDriverId = null;
             stopwatch.currentRun = null;
             stopwatch.currentType = null;
             stopwatch.currentInput = null;
             stopwatch.currentButton = null;
+            stopwatch.displayElement = null;
         }
 
         // Load / Save
