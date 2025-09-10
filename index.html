@@ -190,6 +190,41 @@
             margin: 15px auto;
             display: block;
         }
+        .stat-card:hover {
+            background: linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            color: var(--primary);
+            font-weight: 700;
+            margin-bottom: 8px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .stat-card div:not(.stat-value) {
+            font-size: 0.9em;
+            color: #ccc;
+            line-height: 1.4;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .stats {
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 10px;
+            }
+            
+            .stat-card {
+                padding: 12px;
+            }
+            
+            .stat-value {
+                font-size: 1.5em;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1009,24 +1044,183 @@
             showTab('stats', document.querySelector('[data-tab=\"stats\"]'));
         }
 
+        function getGroupStageRecords() {
+            const records = {
+                fastest: null,
+                slowest: null,
+                bestImprovement: null,
+                worstDecline: null,
+                avgTime: 0,
+                totalDrivers: 0,
+                timeDifference: 0
+            };
+            
+            const driversWithGroupTimes = appState.drivers.filter(d => 
+                d.groupTime1 != null && d.groupTime2 != null
+            );
+            
+            if (driversWithGroupTimes.length === 0) return records;
+            
+            // Oblicz średnie czasy grup (przed bonusami)
+            driversWithGroupTimes.forEach(d => {
+                d.originalGroupAvg = (d.groupTime1 + d.groupTime2) / 2;
+            });
+            
+            // Znajdź najszybszego i najwolniejszego w grupach
+            records.fastest = driversWithGroupTimes.reduce((a, b) => 
+                a.originalGroupAvg < b.originalGroupAvg ? a : b
+            );
+            records.slowest = driversWithGroupTimes.reduce((a, b) => 
+                a.originalGroupAvg > b.originalGroupAvg ? a : b
+            );
+            
+            // Średnia wszystkich
+            records.avgTime = driversWithGroupTimes.reduce((sum, d) => 
+                sum + d.originalGroupAvg, 0
+            ) / driversWithGroupTimes.length;
+            
+            records.totalDrivers = driversWithGroupTimes.length;
+            records.timeDifference = records.slowest.originalGroupAvg - records.fastest.originalGroupAvg;
+            
+            // Porównanie z kwalifikacjami (poprawa/pogorszenie)
+            const driversWithBothStages = driversWithGroupTimes.filter(d => d.avgTime != null);
+            if (driversWithBothStages.length > 0) {
+                const improvements = driversWithBothStages.map(d => ({
+                    driver: d,
+                    improvement: d.avgTime - d.originalGroupAvg // ujemne = poprawa
+                }));
+                
+                records.bestImprovement = improvements.reduce((a, b) => 
+                    a.improvement < b.improvement ? a : b
+                );
+                records.worstDecline = improvements.reduce((a, b) => 
+                    a.improvement > b.improvement ? a : b
+                );
+            }
+            
+            return records;
+        }
+
+        function getKnockoutRecords() {
+            const records = {
+                byRound: {},
+                overall: {
+                    fastest: null,
+                    slowest: null,
+                    avgTime: 0,
+                    totalMatches: 0,
+                    timeDifference: 0
+                }
+            };
+            
+            if (!appState.knockoutBracket || appState.knockoutBracket.length === 0) return records;
+            
+            let allKnockoutTimes = [];
+            
+            // Analizuj każdą rundę osobno
+            appState.knockoutBracket.forEach(round => {
+                const roundTimes = [];
+                
+                round.matches.forEach(match => {
+                    match.drivers.forEach(driver => {
+                        const main = findDriverById(driver.id);
+                        if (main && main.matchTimes && main.matchTimes[round.round] != null) {
+                            const time = main.matchTimes[round.round];
+                            roundTimes.push({ driver: main, time: time });
+                            allKnockoutTimes.push({ driver: main, time: time, round: round.round });
+                        }
+                    });
+                });
+                
+                if (roundTimes.length > 0) {
+                    const fastest = roundTimes.reduce((a, b) => a.time < b.time ? a : b);
+                    const slowest = roundTimes.reduce((a, b) => a.time > b.time ? a : b);
+                    const avgTime = roundTimes.reduce((sum, t) => sum + t.time, 0) / roundTimes.length;
+                    
+                    records.byRound[round.round] = {
+                        fastest: fastest,
+                        slowest: slowest,
+                        avgTime: avgTime,
+                        totalTimes: roundTimes.length,
+                        timeDifference: slowest.time - fastest.time
+                    };
+                }
+            });
+            
+            // Statystyki ogólne fazy pucharowej
+            if (allKnockoutTimes.length > 0) {
+                records.overall.fastest = allKnockoutTimes.reduce((a, b) => a.time < b.time ? a : b);
+                records.overall.slowest = allKnockoutTimes.reduce((a, b) => a.time > b.time ? a : b);
+                records.overall.avgTime = allKnockoutTimes.reduce((sum, t) => sum + t.time, 0) / allKnockoutTimes.length;
+                records.overall.totalMatches = allKnockoutTimes.length;
+                records.overall.timeDifference = records.overall.slowest.time - records.overall.fastest.time;
+            }
+            
+            return records;
+        }
+
+        function getBonusCardsImpactRecords() {
+            const records = {
+                bestImprovement: null,
+                worstImpact: null,
+                neutralCards: 0,
+                avgImpact: 0,
+                totalWithCards: 0
+            };
+            
+            const driversWithCards = appState.drivers.filter(d => 
+                d.bonusCard && d.originalAvgTime != null && d.finalGroupTime != null
+            );
+            
+            if (driversWithCards.length === 0) return records;
+            
+            const impacts = driversWithCards.map(d => ({
+                driver: d,
+                impact: d.finalGroupTime - d.originalAvgTime,
+                card: d.bonusCard
+            })).filter(i => !isNaN(i.impact));
+            
+            if (impacts.length > 0) {
+                records.bestImprovement = impacts.reduce((a, b) => a.impact < b.impact ? a : b);
+                records.worstImpact = impacts.reduce((a, b) => a.impact > b.impact ? a : b);
+                records.avgImpact = impacts.reduce((sum, i) => sum + i.impact, 0) / impacts.length;
+                records.totalWithCards = impacts.length;
+                records.neutralCards = driversWithCards.filter(d => d.bonusCard.type === 'neutral').length;
+            }
+            
+            return records;
+        }
+
         function updateStats(){
             const statDiv = document.getElementById('tournamentStats');
             if(!statDiv) return;
 
-            // Statystyki ogólne – liczba zawodników, ukończone kwalifikacje itp.
+            // Podstawowe statystyki
             const totalDrivers = appState.drivers.length;
             const qualifiedDrivers = appState.drivers.filter(d=>d.qualifyingTime1!=null && d.qualifyingTime2!=null).length;
+            
             statDiv.innerHTML = `
                 <div class="card">
-                    <h3>📋 Podsumowanie</h3>
-                    <p>Łączna liczba zawodników: <strong>${totalDrivers}</strong></p>
-                    <p>Ukończone kwalifikacje: <strong>${qualifiedDrivers}</strong></p>
+                    <h3>📋 Podsumowanie turnieju</h3>
+                    <div class="stats">
+                        <div class="stat-card">
+                            <div class="stat-value">${totalDrivers}</div>
+                            <div>Łączna liczba zawodników</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${qualifiedDrivers}</div>
+                            <div>Ukończone kwalifikacje</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${appState.knockoutBracket.length}</div>
+                            <div>Liczba rund pucharowych</div>
+                        </div>
+                    </div>
                 </div>
             `;
 
-            // 🔎 Najszybszy i najwolniejszy w kwalifikacjach
+            // ⏱️ REKORDY KWALIFIKACYJNE
             const qualified = appState.drivers.filter(d => d.qualifyingTime1 != null && d.qualifyingTime2 != null);
-
             if(qualified.length){
                 qualified.forEach(d => {
                     d.avgQuali = getAverageQualiTime(d);
@@ -1034,16 +1228,222 @@
 
                 const fastest = qualified.reduce((a,b) => a.avgQuali < b.avgQuali ? a : b);
                 const slowest = qualified.reduce((a,b) => a.avgQuali > b.avgQuali ? a : b);
+                const avgOfAll = qualified.reduce((sum, d) => sum + d.avgQuali, 0) / qualified.length;
+                const closestToAvg = qualified.reduce((a,b) => 
+                    Math.abs(a.avgQuali - avgOfAll) < Math.abs(b.avgQuali - avgOfAll) ? a : b
+                );
+                const timeDifference = slowest.avgQuali - fastest.avgQuali;
 
                 statDiv.innerHTML += `
                 <div class="card">
-                    <h3>⏱️ Ciekawostki z kwalifikacji</h3>
-                    <p><strong>Najszybszy:</strong> ${escapeHtml(fastest.name)} (${fastest.avgQuali.toFixed(2)} s)</p>
-                    <p><strong>Najwolniejszy:</strong> ${escapeHtml(slowest.name)} (${slowest.avgQuali.toFixed(2)} s)</p>
+                    <h3>⏱️ Rekordy kwalifikacyjne</h3>
+                    <div class="stats">
+                        <div class="stat-card">
+                            <div class="stat-value">${secondsToTimeFormat(fastest.avgQuali)}</div>
+                            <div><strong>Najszybszy:</strong><br>${escapeHtml(fastest.name)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${secondsToTimeFormat(slowest.avgQuali)}</div>
+                            <div><strong>Najwolniejszy:</strong><br>${escapeHtml(slowest.name)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${secondsToTimeFormat(avgOfAll)}</div>
+                            <div>Średnia wszystkich</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${timeDifference.toFixed(2)}s</div>
+                            <div>Różnica najszybszy-najwolniejszy</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${escapeHtml(closestToAvg.name)}</div>
+                            <div>Najbliżej średniej<br>(${secondsToTimeFormat(closestToAvg.avgQuali)})</div>
+                        </div>
+                    </div>
                 </div>`;
             }
 
-            // 🏆 Podium końcowe
+            // 🎯 REKORDY ETAPU GRUPOWEGO
+            const groupRecords = getGroupStageRecords();
+            if(groupRecords.totalDrivers > 0) {
+                statDiv.innerHTML += `
+                <div class="card">
+                    <h3>🎯 Rekordy etapu grupowego</h3>
+                    <div class="stats">
+                        <div class="stat-card">
+                            <div class="stat-value">${secondsToTimeFormat(groupRecords.fastest.originalGroupAvg)}</div>
+                            <div><strong>Najszybszy:</strong><br>${escapeHtml(groupRecords.fastest.name)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${secondsToTimeFormat(groupRecords.slowest.originalGroupAvg)}</div>
+                            <div><strong>Najwolniejszy:</strong><br>${escapeHtml(groupRecords.slowest.name)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${secondsToTimeFormat(groupRecords.avgTime)}</div>
+                            <div>Średnia wszystkich grup</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${groupRecords.timeDifference.toFixed(2)}s</div>
+                            <div>Różnica najszybszy-najwolniejszy</div>
+                        </div>
+                        ${groupRecords.bestImprovement ? `
+                        <div class="stat-card">
+                            <div class="stat-value">${groupRecords.bestImprovement.improvement.toFixed(2)}s</div>
+                            <div><strong>Najlepsza poprawa:</strong><br>${escapeHtml(groupRecords.bestImprovement.driver.name)}<br><small>vs kwalifikacje</small></div>
+                        </div>` : ''}
+                        ${groupRecords.worstDecline ? `
+                        <div class="stat-card">
+                            <div class="stat-value">+${groupRecords.worstDecline.improvement.toFixed(2)}s</div>
+                            <div><strong>Największe pogorszenie:</strong><br>${escapeHtml(groupRecords.worstDecline.driver.name)}<br><small>vs kwalifikacje</small></div>
+                        </div>` : ''}
+                    </div>
+                </div>`;
+            }
+
+            // 🎰 WPŁYW KART BONUSOWYCH
+            const bonusRecords = getBonusCardsImpactRecords();
+            if(bonusRecords.totalWithCards > 0) {
+                statDiv.innerHTML += `
+                <div class="card">
+                    <h3>🎰 Wpływ kart bonusowych</h3>
+                    <div class="stats">
+                        <div class="stat-card">
+                            <div class="stat-value">${bonusRecords.totalWithCards}</div>
+                            <div>Zawodników z kartami</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${bonusRecords.avgImpact.toFixed(2)}s</div>
+                            <div>Średni wpływ karty</div>
+                        </div>
+                        ${bonusRecords.bestImprovement ? `
+                        <div class="stat-card">
+                            <div class="stat-value">${bonusRecords.bestImprovement.impact.toFixed(2)}s</div>
+                            <div><strong>Najlepsza karta:</strong><br>${escapeHtml(bonusRecords.bestImprovement.driver.name)}<br><small>${escapeHtml(bonusRecords.bestImprovement.card.name)}</small></div>
+                        </div>` : ''}
+                        ${bonusRecords.worstImpact ? `
+                        <div class="stat-card">
+                            <div class="stat-value">+${bonusRecords.worstImpact.impact.toFixed(2)}s</div>
+                            <div><strong>Najgorsza karta:</strong><br>${escapeHtml(bonusRecords.worstImpact.driver.name)}<br><small>${escapeHtml(bonusRecords.worstImpact.card.name)}</small></div>
+                        </div>` : ''}
+                    </div>
+                </div>`;
+            }
+
+            // 🏆 REKORDY FAZY PUCHAROWEJ
+            const knockoutRecords = getKnockoutRecords();
+            if(knockoutRecords.overall.totalMatches > 0) {
+                // Ogólne rekordy fazy pucharowej
+                statDiv.innerHTML += `
+                <div class="card">
+                    <h3>🏆 Rekordy fazy pucharowej - Ogółem</h3>
+                    <div class="stats">
+                        <div class="stat-card">
+                            <div class="stat-value">${secondsToTimeFormat(knockoutRecords.overall.fastest.time)}</div>
+                            <div><strong>Najszybszy czas:</strong><br>${escapeHtml(knockoutRecords.overall.fastest.driver.name)}<br><small>Runda: ${knockoutRecords.overall.fastest.round}</small></div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${secondsToTimeFormat(knockoutRecords.overall.slowest.time)}</div>
+                            <div><strong>Najwolniejszy:</strong><br>${escapeHtml(knockoutRecords.overall.slowest.driver.name)}<br><small>Runda: ${knockoutRecords.overall.slowest.round}</small></div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${secondsToTimeFormat(knockoutRecords.overall.avgTime)}</div>
+                            <div>Średnia fazy pucharowej</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${knockoutRecords.overall.timeDifference.toFixed(2)}s</div>
+                            <div>Różnica najszybszy-najwolniejszy</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${knockoutRecords.overall.totalMatches}</div>
+                            <div>Łączna liczba pomiarów</div>
+                        </div>
+                    </div>
+                </div>`;
+
+                // Rekordy poszczególnych rund
+                Object.entries(knockoutRecords.byRound).forEach(([roundName, roundData]) => {
+                    statDiv.innerHTML += `
+                    <div class="card">
+                        <h3>🏆 Rekordy rundy: ${escapeHtml(roundName)}</h3>
+                        <div class="stats">
+                            <div class="stat-card">
+                                <div class="stat-value">${secondsToTimeFormat(roundData.fastest.time)}</div>
+                                <div><strong>Najszybszy:</strong><br>${escapeHtml(roundData.fastest.driver.name)}</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value">${secondsToTimeFormat(roundData.slowest.time)}</div>
+                                <div><strong>Najwolniejszy:</strong><br>${escapeHtml(roundData.slowest.driver.name)}</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value">${secondsToTimeFormat(roundData.avgTime)}</div>
+                                <div>Średnia rundy</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value">${roundData.timeDifference.toFixed(2)}s</div>
+                                <div>Rozstrzał czasów</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value">${roundData.totalTimes}</div>
+                                <div>Liczba pomiarów</div>
+                            </div>
+                        </div>
+                    </div>`;
+                });
+            }
+
+            // Statystyki grup (zachowaj istniejące)
+            const groupStats = {};
+            ['A','B','C','D'].forEach(group => {
+                const groupDrivers = appState.groups[group] || [];
+                if(groupDrivers.length > 0){
+                    const groupName = {A:'Zapierdalacze',B:'Średni (Super)',C:'Niedzielni',D:'Zaślimaczeni'}[group];
+                    const timesWithCards = groupDrivers
+                        .map(d => findDriverById(d.id))
+                        .filter(d => d && d.finalGroupTime != null)
+                        .map(d => d.finalGroupTime);
+                    
+                    if(timesWithCards.length > 0){
+                        const avgTime = timesWithCards.reduce((a,b) => a+b, 0) / timesWithCards.length;
+                        const fastest = Math.min(...timesWithCards);
+                        const slowest = Math.max(...timesWithCards);
+                        
+                        groupStats[group] = {
+                            name: groupName,
+                            count: groupDrivers.length,
+                            avgTime: avgTime,
+                            fastest: fastest,
+                            slowest: slowest,
+                            range: slowest - fastest
+                        };
+                    }
+                }
+            });
+
+            if(Object.keys(groupStats).length > 0){
+                const fastestGroup = Object.entries(groupStats).reduce((a,b) => a[1].avgTime < b[1].avgTime ? a : b);
+                const slowestGroup = Object.entries(groupStats).reduce((a,b) => a[1].avgTime > b[1].avgTime ? a : b);
+                const mostConsistentGroup = Object.entries(groupStats).reduce((a,b) => a[1].range < b[1].range ? a : b);
+
+                statDiv.innerHTML += `
+                <div class="card">
+                    <h3>📊 Porównanie grup (po kartach)</h3>
+                    <div class="stats">
+                        <div class="stat-card">
+                            <div class="stat-value">Grupa ${fastestGroup[0]}</div>
+                            <div><strong>Najszybsza grupa:</strong><br>${escapeHtml(fastestGroup[1].name)}<br>Średnia: ${secondsToTimeFormat(fastestGroup[1].avgTime)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">Grupa ${slowestGroup[0]}</div>
+                            <div><strong>Najwolniejsza grupa:</strong><br>${escapeHtml(slowestGroup[1].name)}<br>Średnia: ${secondsToTimeFormat(slowestGroup[1].avgTime)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">Grupa ${mostConsistentGroup[0]}</div>
+                            <div><strong>Najbardziej wyrównana:</strong><br>${escapeHtml(mostConsistentGroup[1].name)}<br>Rozstrzał: ${mostConsistentGroup[1].range.toFixed(2)}s</div>
+                        </div>
+                    </div>
+                </div>`;
+            }
+
+            // Podium końcowe (bez zmian)
             const fp = document.getElementById('finalPodium');
             if(fp && appState.finalStandings && appState.finalStandings.length){
                 const podiumByPos = {1:[],2:[],3:[]};
