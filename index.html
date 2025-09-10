@@ -304,18 +304,34 @@
             knockoutBracket: [],
             finalStandings: [],
             bonusCards: [
-                { name: 'Turbo', effect: -1.5, target: 'worse', type: 'positive', icon: '🚀', image: 'karty/turbo.png', description: 'Odejmij 1.5s od gorszego przejazdu' },
-                { name: 'Nitro', effect: -2, target: 'worse', type: 'positive', icon: '💨', image: 'karty/turbo.png', description: 'Odejmij 2s od gorszego przejazdu' },
-                { name: 'Czysta linia', effect: 'repeat', type: 'positive', icon: '🎯', image: 'karty/turbo.png', description: 'Powtórz przejazd i wybierz lepszy wynik' },
-                { name: 'Lepsze opony', effect: 0.98, target: 'better_multiply', type: 'positive', icon: '🛞', image: 'karty/turbo.png', description: 'Czas lepszego przejazdu x0.98' },
-                { name: 'Lepsze paliwo', effect: -1, target: 'worse', type: 'positive', icon: '⛽', image: 'karty/turbo.png', description: 'Odejmij 1s od gorszego przejazdu' },
-                { name: 'Perfekcyjny start', effect: -2.137, target: 'worse', type: 'positive', icon: '🏁', image: 'karty/turbo.png', description: 'Odejmij 2.137s od gorszego przejazdu' },
-                { name: 'Złapałeś kapcia', effect: 2, target: 'better', type: 'negative', icon: '👟', image: 'karty/turbo.png', description: 'Dodaj 2s do lepszego przejazdu' },
-                { name: 'Śliska nawierzchnia', effect: 1.5, target: 'better', type: 'negative', icon: '🌧️', image: 'karty/turbo.png', description: 'Dodaj 1.5s do lepszego przejazdu' },
-                { name: 'Pechowy zakręt', effect: 2.5, target: 'worse', type: 'negative', icon: '🔄', image: 'karty/turbo.png', description: 'Dodaj 2.5s do gorszego przejazdu' },
-                { name: 'Zmęczenie', effect: 1.69, target: 'better', type: 'negative', icon: '😴', image: 'karty/turbo.png', description: 'Dodaj 1.69s do lepszego przejazdu' },
-                { name: 'Pechowy driver', effect: 'worst', type: 'negative', icon: '💀', image: 'karty/turbo.png', description: 'Lepszy czas zostaje zamieniony na wartość najgorszego czasu w tabeli' },
-                { name: 'Pit stop', effect: 1.02, target: 'worse_multiply', type: 'negative', icon: '🔧', image: 'karty/turbo.png', description: 'Czas gorszego przejazdu x1.02' }
+                { name: 'Zostajesz trącony imperatorem', effect: 1.2, target: 'average', type: 'negative', icon: '👑', image: 'karty/imperator.jpg', description: '+1.2 sek do średniego czasu' },
+                { name: 'Gacie sportowe – z przodu żółte z tyłu brązowe', effect: 1.5, target: 'average', type: 'negative', icon: '🩲', image: 'karty/gacie.png', description: '+1.5 sek do średniego czasu za przestraszenie pasażera' },
+                { name: 'Dostałeś playboxa i ćwiczysz w NFS', effect: -1, target: 'average', type: 'positive', icon: '🎮', image: 'karty/playbox.jpg', description: '-1 sek do średniego czasu' },
+                { name: 'Odpalasz jointa po załączeniu nitro', effect: -2, target: 'average', type: 'positive', icon: '🚀', image: 'karty/joint.jpg', description: '-2 sek do średniego czasu' },
+                { name: 'Idealna aerodynamika pojazdu po tjuningu', effect: -2, target: 'average', type: 'positive', icon: '🏎️', image: 'karty/tjuning.jpg', description: '-2 sek do średniego czasu' },
+                { name: 'Zatrzymujesz się na koncert ROKONGRELOWCA', effect: 2, target: 'average', type: 'negative', icon: '🎸', image: 'karty/koncert.jpg', description: '+2 sek do średniego czasu' },
+                { name: 'Spaliła Ci się żarówka w aucie i prosisz kolegę o pomoc', effect: 1.5, target: 'average', type: 'negative', icon: '💡', image: 'karty/zarowka.jpg', description: '+1.5 sek do średniego czasu' },
+                { name: 'Obudził się w Tobie romantyczny kawalir i stajesz po prezerwatywy', effect: 2, target: 'average', type: 'negative', icon: '💕', image: 'karty/prezerwatywy.jpg', description: '+2 sek do średniego czasu' },
+                { name: 'Łysy pyta czy masz problem i zatrzymujesz się mu pomóc', effect: 1, target: 'average', type: 'negative', icon: '👨‍🦲', image: 'karty/lysy.jpg', description: '+1 sek do średniego czasu' },
+                { name: 'Wstępujesz na szybki treninig', effect: 2, target: 'average', type: 'negative', icon: '🏃', image: 'karty/trening.jpg', description: '+2 sek do średniego czasu' },
+                { name: 'Masa wrogiem przyspieszenia (ale za to masz podstawkę na piwo)', effect: 1.5, target: 'average', type: 'negative', icon: '🍺', image: 'karty/masa.png', description: '+1.5 sek do średniego czasu' },
+                { name: 'Przystajesz w naturze na łoni aby podziwiać widoki', effect: 1.5, target: 'average', type: 'negative', icon: '🌲', image: 'karty/natura.jpg', description: '+1.5 sek do średniego czasu' },
+                { name: 'Zerknąłeś na bebech', effect: 0.5, target: 'average', type: 'negative', icon: '👀', image: 'karty/bebech.jpg', description: '+0.5 sek do średniego czasu' },
+                { name: 'Przysnąłeś za kierownicą', effect: 2.5, target: 'average', type: 'negative', icon: '😴', image: 'karty/sen.jpg', description: '+2.5 sek do średniego czasu' },
+                { name: 'Rozstawiasz namiot, ale zajebało śledziem', effect: 1, target: 'average', type: 'negative', icon: '🏕️', image: 'karty/namiot.jpg', description: '+1 sek do średniego czasu' },
+                { name: 'Za rogiem stoją psy i musisz zatrzymać się na jointa', effect: 1.5, target: 'average', type: 'negative', icon: '🚔', image: 'karty/psy.jpg', description: '+1.5 sek do średniego czasu' },
+                { name: 'Wypiłeś drugie piwo i obudzili się w Tobie okrutne zondze', effect: -1.5, target: 'average', type: 'positive', icon: '🍻', image: 'karty/piwo.jpg', description: '-1.5 sek do średniego czasu' },
+                { name: 'Wsiadasz za kółko na rauszu', effect: 0.5, target: 'average', type: 'negative', icon: '🥴', image: 'karty/rausz.jpg', description: '+0.5 sek do średniego czasu' },
+                { name: 'Wypadłeś z zakrętu', effect: 1, target: 'average', type: 'negative', icon: '🌀', image: 'karty/zakret.jpg', description: '+1 sek do średniego czasu' },
+                { name: 'Uciąłeś kurze złote jaje by obniżyć masę auta', effect: -0.25, target: 'average', type: 'positive', icon: '🥚', image: 'karty/jaje.jpg', description: '-0.25 sek do średniego czasu' },
+                { name: 'Uprowadziło Cie UFO – ponawiasz przejazd po powrocie na ziemię', effect: 'repeat', type: 'positive', icon: '🛸', image: 'karty/ufo.jpg', description: 'Karta umożliwia dodatkowy pomiar i podmianę gorszego czasu na nowy' },
+                { name: 'Dostajesz błogosławieństwo z Watykanu', effect: -2.137, target: 'average', type: 'positive', icon: '⛪', image: 'karty/watykan.jpg', description: '-2.137 sek do średniego czasu' },
+                { name: 'Zajebali Ci silnik', effect: 2, target: 'average', type: 'negative', icon: '🔧', image: 'karty/silnik.jpg', description: '+2 sek do średniego czasu' },
+                { name: 'Szybki swap', effect: -1.5, target: 'average', type: 'positive', icon: '⚡', image: 'karty/swap.jpg', description: '-1.5 sek do średniego czasu' },
+                { name: 'Nawiedza Cie Adaś i musisz mu zmienić majteczki z rzozą', effect: 1.5, target: 'average', type: 'negative', icon: '👶', image: 'karty/adas.JPG', description: '+1.5 sek do średniego czasu' },
+                { name: 'Zakładasz kask dla większego bezpieczeństwa', effect: -0.5, target: 'average', type: 'positive', icon: '🪖', image: 'karty/kask.jpg', description: '-0.5 sek do średniego czasu' },
+                { name: 'SPIERDALASZ LAMUSIAKU', effect: 0, target: 'average', type: 'neutral', icon: '🏃‍♂️', image: 'karty/spierdalasz.jpg', description: 'Karta nie wnosi nic do czasu – omija Cie kolejka bycia pasażerem' },
+                { name: 'Płużysz przodem jak jebane Audi', effect: 1.5, target: 'average', type: 'negative', icon: '🚗', image: 'karty/audi.jpg', description: '+1.5 sek do średniego czasu' }
             ],
             groupStage: 'times'
         };
@@ -690,23 +706,49 @@
             if(driver.groupTime1==null || driver.groupTime2==null) return;
             let t1 = driver.groupTime1, t2 = driver.groupTime2;
             let better = Math.min(t1,t2), worse = Math.max(t1,t2);
-            if(driver.bonusCard){ const card = driver.bonusCard; switch(card.effect){
-                case 'repeat':
-                    if(driver.repeatedTime!=null){ better = Math.min(better, driver.repeatedTime); worse = Math.max(better, driver.repeatedTime); }
-                    // final is average of better + worse
-                    driver.finalGroupTime = (better + worse)/2; break;
-                case 'worst':
-                    // set better to current worst time across all drivers
-                    const allWorst = appState.drivers.filter(d=>d.groupTime1!=null && d.groupTime2!=null).map(d=>Math.max(d.groupTime1,d.groupTime2));
-                    if(allWorst.length) better = Math.max(...allWorst);
-                    driver.finalGroupTime = (better + worse)/2; break;
-                default:
-                    if(card.target === 'worse') worse += card.effect;
-                    else if(card.target === 'better') better += card.effect;
-                    else if(card.target === 'better_multiply') better *= card.effect;
-                    else if(card.target === 'worse_multiply') worse *= card.effect;
-                    driver.finalGroupTime = (better + worse)/2; break;
-            }} else { driver.finalGroupTime = (t1 + t2)/2 }
+            let average = (t1 + t2) / 2;
+            
+            if(driver.bonusCard){ 
+                const card = driver.bonusCard; 
+                switch(card.effect){
+                    case 'repeat':
+                        if(driver.repeatedTime!=null){ 
+                            better = Math.min(better, driver.repeatedTime); 
+                            worse = Math.max(better, driver.repeatedTime); 
+                        }
+                        driver.finalGroupTime = (better + worse)/2; 
+                        break;
+                    case 'worst':
+                        // set better to current worst time across all drivers
+                        const allWorst = appState.drivers.filter(d=>d.groupTime1!=null && d.groupTime2!=null).map(d=>Math.max(d.groupTime1,d.groupTime2));
+                        if(allWorst.length) better = Math.max(...allWorst);
+                        driver.finalGroupTime = (better + worse)/2; 
+                        break;
+                    default:
+                        if(card.target === 'worse') {
+                            worse += card.effect;
+                            driver.finalGroupTime = (better + worse)/2;
+                        } else if(card.target === 'better') {
+                            better += card.effect;
+                            driver.finalGroupTime = (better + worse)/2;
+                        } else if(card.target === 'better_multiply') {
+                            better *= card.effect;
+                            driver.finalGroupTime = (better + worse)/2;
+                        } else if(card.target === 'worse_multiply') {
+                            worse *= card.effect;
+                            driver.finalGroupTime = (better + worse)/2;
+                        } else if(card.target === 'average') {
+                            // Nowa logika - dodaj/odejmij od średniej
+                            driver.finalGroupTime = average + card.effect;
+                        } else {
+                            // Fallback - traktuj jako średnią
+                            driver.finalGroupTime = average + card.effect;
+                        }
+                        break;
+                }
+            } else { 
+                driver.finalGroupTime = average;
+            }
         }
 
         // Knockout: build bracket using group rankings
