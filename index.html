@@ -175,6 +175,21 @@
                 display: none;
             }
         }
+        .bonus-card-image {
+            width: 80px;
+            height: 80px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin: 10px 0;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+
+        .modal-content .bonus-card-image {
+            width: 120px;
+            height: 120px;
+            margin: 15px auto;
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -289,18 +304,18 @@
             knockoutBracket: [],
             finalStandings: [],
             bonusCards: [
-                { name: 'Turbo', effect: -1.5, target: 'worse', type: 'positive', icon: '🚀', description: 'Odejmij 1.5s od gorszego przejazdu' },
-                { name: 'Nitro', effect: -2, target: 'worse', type: 'positive', icon: '💨', description: 'Odejmij 2s od gorszego przejazdu' },
-                { name: 'Czysta linia', effect: 'repeat', type: 'positive', icon: '🎯', description: 'Powtórz przejazd i wybierz lepszy wynik' },
-                { name: 'Lepsze opony', effect: 0.98, target: 'better_multiply', type: 'positive', icon: '🛞', description: 'Czas lepszego przejazdu x0.98' },
-                { name: 'Lepsze paliwo', effect: -1, target: 'worse', type: 'positive', icon: '⛽', description: 'Odejmij 1s od gorszego przejazdu' },
-                { name: 'Perfekcyjny start', effect: -2.137, target: 'worse', type: 'positive', icon: '🏁', description: 'Odejmij 2.137s od gorszego przejazdu' },
-                { name: 'Złapałeś kapcia', effect: 2, target: 'better', type: 'negative', icon: '👟', description: 'Dodaj 2s do lepszego przejazdu' },
-                { name: 'Śliska nawierzchnia', effect: 1.5, target: 'better', type: 'negative', icon: '🌧️', description: 'Dodaj 1.5s do lepszego przejazdu' },
-                { name: 'Pechowy zakręt', effect: 2.5, target: 'worse', type: 'negative', icon: '🔄', description: 'Dodaj 2.5s do gorszego przejazdu' },
-                { name: 'Zmęczenie', effect: 1.69, target: 'better', type: 'negative', icon: '😴', description: 'Dodaj 1.69s do lepszego przejazdu' },
-                { name: 'Pechowy driver', effect: 'worst', type: 'negative', icon: '💀', description: 'Lepszy czas zostaje zamieniony na wartość najgorszego czasu w tabeli' },
-                { name: 'Pit stop', effect: 1.02, target: 'worse_multiply', type: 'negative', icon: '🔧', description: 'Czas gorszego przejazdu x1.02' }
+                { name: 'Turbo', effect: -1.5, target: 'worse', type: 'positive', icon: '🚀', image: 'karty/turbo.png', description: 'Odejmij 1.5s od gorszego przejazdu' },
+                { name: 'Nitro', effect: -2, target: 'worse', type: 'positive', icon: '💨', image: 'karty/turbo.png', description: 'Odejmij 2s od gorszego przejazdu' },
+                { name: 'Czysta linia', effect: 'repeat', type: 'positive', icon: '🎯', image: 'karty/turbo.png', description: 'Powtórz przejazd i wybierz lepszy wynik' },
+                { name: 'Lepsze opony', effect: 0.98, target: 'better_multiply', type: 'positive', icon: '🛞', image: 'karty/turbo.png', description: 'Czas lepszego przejazdu x0.98' },
+                { name: 'Lepsze paliwo', effect: -1, target: 'worse', type: 'positive', icon: '⛽', image: 'karty/turbo.png', description: 'Odejmij 1s od gorszego przejazdu' },
+                { name: 'Perfekcyjny start', effect: -2.137, target: 'worse', type: 'positive', icon: '🏁', image: 'karty/turbo.png', description: 'Odejmij 2.137s od gorszego przejazdu' },
+                { name: 'Złapałeś kapcia', effect: 2, target: 'better', type: 'negative', icon: '👟', image: 'karty/turbo.png', description: 'Dodaj 2s do lepszego przejazdu' },
+                { name: 'Śliska nawierzchnia', effect: 1.5, target: 'better', type: 'negative', icon: '🌧️', image: 'karty/turbo.png', description: 'Dodaj 1.5s do lepszego przejazdu' },
+                { name: 'Pechowy zakręt', effect: 2.5, target: 'worse', type: 'negative', icon: '🔄', image: 'karty/turbo.png', description: 'Dodaj 2.5s do gorszego przejazdu' },
+                { name: 'Zmęczenie', effect: 1.69, target: 'better', type: 'negative', icon: '😴', image: 'karty/turbo.png', description: 'Dodaj 1.69s do lepszego przejazdu' },
+                { name: 'Pechowy driver', effect: 'worst', type: 'negative', icon: '💀', image: 'karty/turbo.png', description: 'Lepszy czas zostaje zamieniony na wartość najgorszego czasu w tabeli' },
+                { name: 'Pit stop', effect: 1.02, target: 'worse_multiply', type: 'negative', icon: '🔧', image: 'karty/turbo.png', description: 'Czas gorszego przejazdu x1.02' }
             ],
             groupStage: 'times'
         };
@@ -602,8 +617,36 @@
                     const main = appState.drivers.find(d=>d.id===driver.id);
                     const gt1 = main?.groupTime1 ?? driver.groupTime1; const gt2 = main?.groupTime2 ?? driver.groupTime2;
                     const avg = (gt1!=null && gt2!=null) ? ((gt1+gt2)/2).toFixed(2) : '—';
-                    const btnLabel = main?.bonusCard ? `${escapeHtml(main.bonusCard.name)}` : '🎰 Losuj kartę';
-                    return `<div class="driver-item" style="margin:8px 0"><div><div>${escapeHtml(driver.name)}</div><div style="font-size:.85em;color:#aaa;margin-top:6px">Czasy: ${gt1!=null?secondsToTimeFormat(gt1):'—'}, ${gt2!=null?secondsToTimeFormat(gt2):'—'} | Średnia: ${avg}</div></div><div style="display:flex;gap:8px;align-items:center"><button onclick="drawBonusCard(${driver.id})" ${main && main.bonusCard? 'disabled':''}>${btnLabel}</button></div>${main && main.bonusCard?`<div style="margin-top:8px;padding:8px;background:rgba(0,0,0,.15);border-radius:8px"><div>Bonus: ${escapeHtml(main.bonusCard.name)}</div><div>Nowy czas: <strong>${main.finalGroupTime!=null?main.secondsToTimeFormat(finalGroupTime):'—'}</strong></div></div>`:''}${main && main.bonusCard && main.bonusCard.effect==='repeat' && main.repeatedTime==null?`<div class="repeat-time-input" style="margin-top:8px"><span style="margin-right:8px">Czas powtórzonego przejazdu:</span><input type="text" pattern="[0-9]{1,2}:[0-9]{1,2}\\.[0-9]{1,2}" class="time-input" step="0.01" min="0" placeholder="MM:SS.ss" onchange="updateRepeatedTime(${driver.id},this.value)"></div>`:''}</div>`
+                    const btnLabel = main?.bonusCard 
+                        ? (main.bonusCard.image 
+                            ? `<img src="${main.bonusCard.image}" alt="${main.bonusCard.name}" style="width:20px;height:20px;vertical-align:middle;margin-right:5px;">${escapeHtml(main.bonusCard.name)}`
+                            : `${escapeHtml(main.bonusCard.name)}`)
+                        : '🎰 Losuj kartę';
+
+                    return `<div class="driver-item" style="margin:8px 0">
+                        <div>
+                            <div>${escapeHtml(driver.name)}</div>
+                            <div style="font-size:.85em;color:#aaa;margin-top:6px">
+                                Czasy: ${gt1!=null?secondsToTimeFormat(gt1):'—'}, ${gt2!=null?secondsToTimeFormat(gt2):'—'} 
+                                | Średnia: ${avg}
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <button onclick="drawBonusCard(${driver.id})" ${main && main.bonusCard ? 'disabled' : ''}>${btnLabel}</button>
+                        </div>
+                        ${main && main.bonusCard ? `
+                            <div style="margin-top:8px;padding:8px;background:rgba(0,0,0,.15);border-radius:8px">
+                                <div>Bonus: ${escapeHtml(main.bonusCard.name)}</div>
+                                <div>Nowy czas: <strong>${main.finalGroupTime != null ? secondsToTimeFormat(main.finalGroupTime) : '—'}</strong></div>
+                            </div>
+                        ` : ''}
+                        ${main && main.bonusCard && main.bonusCard.effect==='repeat' && main.repeatedTime==null ? `
+                            <div class="repeat-time-input" style="margin-top:8px">
+                                <span style="margin-right:8px">Czas powtórzonego przejazdu:</span>
+                                <input type="text" pattern="[0-9]{1,2}:[0-9]{1,2}\\.[0-9]{1,2}" class="time-input" step="0.01" min="0" placeholder="MM:SS.ss" onchange="updateRepeatedTime(${driver.id},this.value)">
+                            </div>
+                        ` : ''}
+                    </div>`;
                 }).join('') || '<div class="card">Brak zawodników w tej grupie</div>';
                 return `<div class="card"><h3>Grupa ${group} - ${groupName} <span class="group-badge group-${group}">${group}</span></h3>${list}</div>`
             }).join('');
@@ -626,8 +669,13 @@
         function showBonusCardAnimation(card, driver){
             const modal = document.getElementById('bonusCardModal');
             document.getElementById('bonusCardTitle').textContent = card.name + ' ' + (card.icon||'');
-            const iconEl = document.getElementById('bonusCardIcon'); iconEl.textContent = card.icon || '';
-            iconEl.classList.add('card-spinning');
+            const iconEl = document.getElementById('bonusCardIcon');
+            if (card.image) {
+                iconEl.innerHTML = `<img src="${card.image}" alt="${card.name}" class="bonus-card-image card-spinning">`;
+            } else {
+                iconEl.textContent = card.icon || '';
+                iconEl.classList.add('card-spinning');
+            }
             document.getElementById('bonusCardDescription').textContent = `${driver.name} wylosował: ${card.description}`;
             const originalAvg = driver.originalAvgTime ?? ((driver.groupTime1+driver.groupTime2)/2);
             const newAvg = driver.finalGroupTime ?? originalAvg;
