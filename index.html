@@ -185,8 +185,8 @@
         }
 
         .modal-content .bonus-card-image {
-            width: 120px;
-            height: 120px;
+            width: 400px;
+            height: 483px;
             margin: 15px auto;
             display: block;
         }
@@ -215,6 +215,10 @@
                 </div>
                 <div id="driversList" class="drivers-list"></div>
                 <button onclick="startQualifying()" style="margin-top:16px;width:100%">Rozpocznij kwalifikacje →</button>
+                <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+                    <button onclick="exportTournamentToCSV()" style="background:var(--success)">📤 Eksportuj turniej do CSV</button>
+                    <button onclick="importTournamentFromCSV()" style="background:var(--warning);color:black">📥 Importuj turniej z CSV</button>
+                </div>
             </div>
         </div>
 
@@ -1074,7 +1078,113 @@
                 return `<div class="card"><h3>Grupa ${group} - ${groupName} <span class="group-badge group-${group}">${group}</span></h3><div class="podium">${podium}</div>${rest?`<div style="margin-top:10px"><h4>Pozostali:</h4>${rest}</div>`:''}</div>`
             }).join('');
         }
+        function exportTournamentToCSV() {
+            try {
+                const data = JSON.stringify(appState);
+                const csvContent = `"tournament_data"\n"${data.replace(/"/g, '""')}"`;
+                
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                
+                const url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                
+                const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+                link.setAttribute('download', `turniej_${timestamp}.csv`);
+                
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                alert('Turniej został wyeksportowany do pliku CSV');
+            } catch (e) {
+                alert('Błąd podczas eksportu: ' + e.message);
+                console.error('Export error:', e);
+            }
+        }
 
+        function importTournamentFromCSV() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.csv';
+            
+            input.onchange = function(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const csvContent = e.target.result;
+                        const lines = csvContent.split('\n');
+                        
+                        // Sprawdź czy to prawidłowy format
+                        if (lines.length < 2 || !lines[0].includes('tournament_data')) {
+                            alert('Nieprawidłowy format pliku CSV');
+                            return;
+                        }
+                        
+                        // Wyciągnij dane z drugiej linii i usuń cudzysłowy
+                        let jsonData = lines[1];
+                        if (jsonData.startsWith('"') && jsonData.endsWith('"')) {
+                            jsonData = jsonData.slice(1, -1);
+                        }
+                        // Przywróć podwójne cudzysłowy
+                        jsonData = jsonData.replace(/""/g, '"');
+                        
+                        const importedState = JSON.parse(jsonData);
+                        
+                        // Sprawdź czy dane mają wymagane pola
+                        if (!importedState.drivers || !Array.isArray(importedState.drivers)) {
+                            alert('Nieprawidłowe dane turnieju w pliku');
+                            return;
+                        }
+                        
+                        // Potwierdź import
+                        if (confirm(`Czy chcesz zaimportować turniej z ${importedState.drivers.length} zawodnikami?\nUWAGA: Obecny turniej zostanie zastąpiony!`)) {
+                            // Zachowaj strukturę danych
+                            appState = Object.assign({
+                                drivers: [],
+                                stage: 'setup',
+                                groups: { A: [], B: [], C: [], D: [] },
+                                knockoutBracket: [],
+                                finalStandings: [],
+                                bonusCards: appState.bonusCards, // Zachowaj aktualne karty
+                                groupStage: 'times'
+                            }, importedState);
+                            
+                            // Zapisz stan
+                            saveState();
+                            
+                            // Przejdź do odpowiedniej zakładki
+                            if (appState.stage === 'qualifying') {
+                                showTab('qualifying', document.querySelector('[data-tab="qualifying"]'));
+                            } else if (appState.stage === 'groups') {
+                                showTab('groups', document.querySelector('[data-tab="groups"]'));
+                            } else if (appState.stage === 'knockout') {
+                                showTab('knockout', document.querySelector('[data-tab="knockout"]'));
+                            } else {
+                                showTab('setup', document.querySelector('[data-tab="setup"]'));
+                            }
+                            
+                            // Odśwież wszystkie wyświetlacze
+                            updateAllDisplays();
+                            
+                            alert('Turniej został pomyślnie zaimportowany!');
+                        }
+                        
+                    } catch (e) {
+                        alert('Błąd podczas importu: ' + e.message);
+                        console.error('Import error:', e);
+                    }
+                };
+                
+                reader.readAsText(file);
+            };
+            
+            input.click();
+        }
         // init
         window.addEventListener('load', ()=>{
             loadState();
