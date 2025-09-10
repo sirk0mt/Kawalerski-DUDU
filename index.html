@@ -264,6 +264,23 @@
     </div>
 
     <script>
+        // Funkcje konwersji czasu
+        function secondsToTimeFormat(seconds) {
+            if (seconds === null || seconds === undefined) return '--:--.--';
+            const mins = Math.floor(seconds / 60);
+            const secs = (seconds % 60).toFixed(2);
+            return `${mins.toString().padStart(2, '0')}:${secs.padStart(5, '0')}`;
+        }
+
+        function timeFormatToSeconds(timeString) {
+            if (!timeString || timeString === '--:--.--') return null;
+            const [mins, secs] = timeString.split(':');
+            return parseFloat(mins) * 60 + parseFloat(secs);
+        }
+
+        function isValidTimeFormat(timeString) {
+            return /^\d{1,2}:\d{1,2}\.\d{1,2}$/.test(timeString);
+        }
         // Aplikacja - prosty, serializowalny stan
         let appState = {
             drivers: [],
@@ -320,7 +337,7 @@
                 if (!displayEl || !displayEl.classList.contains('stopwatch-display')) {
                     displayEl = document.createElement('span');
                     displayEl.className = 'stopwatch-display';
-                    displayEl.textContent = '0.00';
+                    displayEl.textContent = '00:00.00';
                     buttonElement.parentNode.insertBefore(displayEl, buttonElement.nextSibling);
                 }
                 
@@ -339,9 +356,9 @@
                 stopwatch.intervalId = setInterval(() => {
                     if (stopwatch.isRunning && stopwatch.displayElement) {
                         const elapsed = (Date.now() - stopwatch.startTime) / 1000;
-                        stopwatch.displayElement.textContent = elapsed.toFixed(2);
+                        stopwatch.displayElement.textContent = secondsToTimeFormat(elapsed);
                     }
-                }, 10); // Aktualizuj co 10ms
+                }, 10);
             }
         }
 
@@ -358,7 +375,7 @@
             }
             
             if (stopwatch.currentInput) {
-                stopwatch.currentInput.value = elapsed.toFixed(2);
+                stopwatch.currentInput.value = secondsToTimeFormat(elapsed);
                 const event = new Event('change');
                 stopwatch.currentInput.dispatchEvent(event);
             }
@@ -369,7 +386,7 @@
             
             // Ukryj lub zresetuj wyświetlacz
             if (stopwatch.displayElement) {
-                stopwatch.displayElement.textContent = '0.00';
+                stopwatch.displayElement.textContent = '00:00.00';
             }
             
             // Resetuj stan stopera
@@ -472,22 +489,28 @@
             list.innerHTML = appState.drivers.map((driver, idx)=>{
                 return `<div class="driver-item"><span>${idx+1}. ${escapeHtml(driver.name)}</span><div style="display:flex;gap:8px;align-items:center">
                     <div style="display:flex;align-items:center;gap:4px">
-                        <input type="number" class="time-input" placeholder="Czas 1" step="0.01" min="0" value="${driver.qualifyingTime1==null?'':driver.qualifyingTime1}" onchange="updateQualifyingTime(${driver.id},1,this.value)">
+                        <input type="text" pattern="[0-9]{1,2}:[0-9]{1,2}\\.[0-9]{1,2}" class="time-input" placeholder="MM:SS.ss" step="0.01" min="0" value="${driver.qualifyingTime1==null?'':driver.qualifyingTime1}" onchange="updateQualifyingTime(${driver.id},1,this.value)">
                         <button class="stopwatch-btn" onclick="toggleStopwatch(${driver.id}, 1, 'qualifying', this)">⏱️</button>
                     </div>
                     <div style="display:flex;align-items:center;gap:4px">
-                        <input type="number" class="time-input" placeholder="Czas 2" step="0.01" min="0" value="${driver.qualifyingTime2==null?'':driver.qualifyingTime2}" onchange="updateQualifyingTime(${driver.id},2,this.value)">
+                        <input type="text" pattern="[0-9]{1,2}:[0-9]{1,2}\\.[0-9]{1,2}" class="time-input" placeholder="MM:SS.ss" step="0.01" min="0" value="${driver.qualifyingTime2==null?'':driver.qualifyingTime2}" onchange="updateQualifyingTime(${driver.id},2,this.value)">
                         <button class="stopwatch-btn" onclick="toggleStopwatch(${driver.id}, 2, 'qualifying', this)">⏱️</button>
                     </div>
-                    <span style="min-width:110px;text-align:right">${driver.avgTime?`Średnia: ${driver.avgTime.toFixed(2)}s`:''}</span>
+                    <span style="min-width:110px;text-align:right">${driver.avgTime?`Średnia: ${secondsToTimeFormat(driver.avgTime)}s`:''}</span>
                 </div></div>`
             }).join('');
         }
-        function updateQualifyingTime(id, run, value){
+        function updateQualifyingTime(id, run, value) {
             const driver = findDriverById(id); if(!driver) return;
-            const v = parseFloat(value); if(isNaN(v)||v<0) return;
-            if(run===1) driver.qualifyingTime1 = v; if(run===2) driver.qualifyingTime2 = v;
-            if(driver.qualifyingTime1!=null && driver.qualifyingTime2!=null) driver.avgTime = (driver.qualifyingTime1+driver.qualifyingTime2)/2;
+            const seconds = timeFormatToSeconds(value);
+            if(seconds === null || seconds < 0) return;
+            
+            if(run===1) driver.qualifyingTime1 = seconds; 
+            if(run===2) driver.qualifyingTime2 = seconds;
+            
+            if(driver.qualifyingTime1 != null && driver.qualifyingTime2 != null) {
+                driver.avgTime = (driver.qualifyingTime1 + driver.qualifyingTime2) / 2;
+            }
             updateQualifyingList(); saveState();
         }
         function startQualifying(){
@@ -523,13 +546,13 @@
                     // sync group times from main driver if present
                     const main = appState.drivers.find(d=>d.id===driver.id);
                     if(main){ driver.groupTime1 = driver.groupTime1 ?? main.groupTime1 ?? null; driver.groupTime2 = driver.groupTime2 ?? main.groupTime2 ?? null }
-                    return `<div class="driver-item" style="margin:8px 0"><span>${escapeHtml(driver.name)} (Śr. kwal: ${driver.avgTime?driver.avgTime.toFixed(2):'—'}s)</span><div style="display:flex;gap:8px;align-items:center">
+                    return `<div class="driver-item" style="margin:8px 0"><span>${escapeHtml(driver.name)} (Śr. kwal: ${driver.avgTime?secondsToTimeFormat(driver.avgTime):'—'}s)</span><div style="display:flex;gap:8px;align-items:center">
                         <div style="display:flex;align-items:center;gap:4px">
-                            <input type="number" class="time-input" placeholder="Czas 1" step="0.01" min="0" value="${driver.groupTime1==null?'':driver.groupTime1}" onchange="updateGroupTime(${driver.id},1,this.value)">
+                            <input type="text" pattern="[0-9]{1,2}:[0-9]{1,2}\\.[0-9]{1,2}" class="time-input" placeholder="MM:SS.ss" step="0.01" min="0" value="${driver.groupTime1==null?'':driver.groupTime1}" onchange="updateGroupTime(${driver.id},1,this.value)">
                             <button class="stopwatch-btn" onclick="toggleStopwatch(${driver.id}, 1, 'group', this)">⏱️</button>
                         </div>
                         <div style="display:flex;align-items:center;gap:4px">
-                            <input type="number" class="time-input" placeholder="Czas 2" step="0.01" min="0" value="${driver.groupTime2==null?'':driver.groupTime2}" onchange="updateGroupTime(${driver.id},2,this.value)">
+                            <input type="text" pattern="[0-9]{1,2}:[0-9]{1,2}\\.[0-9]{1,2}" class="time-input" placeholder="MM:SS.ss" step="0.01" min="0" value="${driver.groupTime2==null?'':driver.groupTime2}" onchange="updateGroupTime(${driver.id},2,this.value)">
                             <button class="stopwatch-btn" onclick="toggleStopwatch(${driver.id}, 2, 'group', this)">⏱️</button>
                         </div>
                     </div></div>`
@@ -543,15 +566,30 @@
         }
 
         // Update group time (stores both on main driver and group copy)
-        function updateGroupTime(id, run, value){
-            const v = parseFloat(value); if(isNaN(v)||v<0) return;
+        function updateGroupTime(id, run, value) {
+            const seconds = timeFormatToSeconds(value);
+            if(seconds === null || seconds < 0) return;
+            
             // update main driver
             const main = appState.drivers.find(d=>d.id===id);
             if(!main) return;
-            if(run===1) main.groupTime1 = v; if(run===2) main.groupTime2 = v;
-            if(main.groupTime1!=null && main.groupTime2!=null && !main.originalAvgTime) main.originalAvgTime = (main.groupTime1+main.groupTime2)/2;
+            
+            if(run===1) main.groupTime1 = seconds; 
+            if(run===2) main.groupTime2 = seconds;
+            
+            if(main.groupTime1 != null && main.groupTime2 != null && !main.originalAvgTime) {
+                main.originalAvgTime = (main.groupTime1 + main.groupTime2) / 2;
+            }
+            
             // update group copy
-            ['A','B','C','D'].forEach(g=>{ const copy = (appState.groups[g]||[]).find(x=>x.id===id); if(copy){ if(run===1) copy.groupTime1 = v; if(run===2) copy.groupTime2 = v } });
+            ['A','B','C','D'].forEach(g=>{ 
+                const copy = (appState.groups[g]||[]).find(x=>x.id===id); 
+                if(copy){ 
+                    if(run===1) copy.groupTime1 = seconds; 
+                    if(run===2) copy.groupTime2 = seconds; 
+                } 
+            });
+            
             updateGroupsDisplay(); saveState();
         }
 
@@ -565,7 +603,7 @@
                     const gt1 = main?.groupTime1 ?? driver.groupTime1; const gt2 = main?.groupTime2 ?? driver.groupTime2;
                     const avg = (gt1!=null && gt2!=null) ? ((gt1+gt2)/2).toFixed(2) : '—';
                     const btnLabel = main?.bonusCard ? `${escapeHtml(main.bonusCard.name)}` : '🎰 Losuj kartę';
-                    return `<div class="driver-item" style="margin:8px 0"><div><div>${escapeHtml(driver.name)}</div><div style="font-size:.85em;color:#aaa;margin-top:6px">Czasy: ${gt1!=null?gt1.toFixed(2)+'s':'—'}, ${gt2!=null?gt2.toFixed(2)+'s':'—'} | Średnia: ${avg}</div></div><div style="display:flex;gap:8px;align-items:center"><button onclick="drawBonusCard(${driver.id})" ${main && main.bonusCard? 'disabled':''}>${btnLabel}</button></div>${main && main.bonusCard?`<div style="margin-top:8px;padding:8px;background:rgba(0,0,0,.15);border-radius:8px"><div>Bonus: ${escapeHtml(main.bonusCard.name)}</div><div>Nowy czas: <strong>${main.finalGroupTime!=null?main.finalGroupTime.toFixed(2)+'s':'—'}</strong></div></div>`:''}${main && main.bonusCard && main.bonusCard.effect==='repeat' && main.repeatedTime==null?`<div class="repeat-time-input" style="margin-top:8px"><span style="margin-right:8px">Czas powtórzonego przejazdu:</span><input type="number" class="time-input" step="0.01" min="0" placeholder="Czas powtórzenia" onchange="updateRepeatedTime(${driver.id},this.value)"></div>`:''}</div>`
+                    return `<div class="driver-item" style="margin:8px 0"><div><div>${escapeHtml(driver.name)}</div><div style="font-size:.85em;color:#aaa;margin-top:6px">Czasy: ${gt1!=null?secondsToTimeFormat(gt1):'—'}, ${gt2!=null?secondsToTimeFormat(gt2):'—'} | Średnia: ${avg}</div></div><div style="display:flex;gap:8px;align-items:center"><button onclick="drawBonusCard(${driver.id})" ${main && main.bonusCard? 'disabled':''}>${btnLabel}</button></div>${main && main.bonusCard?`<div style="margin-top:8px;padding:8px;background:rgba(0,0,0,.15);border-radius:8px"><div>Bonus: ${escapeHtml(main.bonusCard.name)}</div><div>Nowy czas: <strong>${main.finalGroupTime!=null?main.secondsToTimeFormat(finalGroupTime):'—'}</strong></div></div>`:''}${main && main.bonusCard && main.bonusCard.effect==='repeat' && main.repeatedTime==null?`<div class="repeat-time-input" style="margin-top:8px"><span style="margin-right:8px">Czas powtórzonego przejazdu:</span><input type="text" pattern="[0-9]{1,2}:[0-9]{1,2}\\.[0-9]{1,2}" class="time-input" step="0.01" min="0" placeholder="MM:SS.ss" onchange="updateRepeatedTime(${driver.id},this.value)"></div>`:''}</div>`
                 }).join('') || '<div class="card">Brak zawodników w tej grupie</div>';
                 return `<div class="card"><h3>Grupa ${group} - ${groupName} <span class="group-badge group-${group}">${group}</span></h3>${list}</div>`
             }).join('');
@@ -743,7 +781,7 @@
                             transition:all 0.3s ease">
                     <span style="flex:1;font-size:0.9em">${escapeHtml(main.name)}</span>
                     <div style="display:flex;align-items:center;gap:4px">
-                        <input type="number" class="time-input" placeholder="Czas" step="0.01" min="0" value="${val}" 
+                        <input type="text" class="time-input" pattern="[0-9]{1,2}:[0-9]{1,2}\\.[0-9]{1,2}" placeholder="MM:SS.ss" step="0.01" min="0" value="${val}" 
                             onchange="updateMatchTime(${roundIndex},${matchIndex},${main.id},'${round.round}',this.value)" 
                             style="width:70px;font-size:0.9em">
                         <button class="stopwatch-btn" onclick="toggleStopwatch(${main.id}, '${round.round}', 'knockout', this)" 
@@ -766,15 +804,21 @@
             const m = r.matches[matchIdx]; if(!m) return;
             const driver = m.drivers.find(d=>d.id===driverId); if(!driver) return;
             const main = findDriverById(driverId) || driver;
-            const v = parseFloat(value); if(isNaN(v)||v<0) return;
+            
+            const seconds = timeFormatToSeconds(value);
+            if(seconds === null || seconds < 0) return;
+            
             if(!main.matchTimes) main.matchTimes = {};
-            main.matchTimes[roundName] = v;
+            main.matchTimes[roundName] = seconds;
+            
             if(!driver.matchTimes) driver.matchTimes = {};
-            driver.matchTimes[roundName] = v;
-            if(m.drivers.every(d=>d.matchTimes && d.matchTimes[roundName]!=null)){
+            driver.matchTimes[roundName] = seconds;
+            
+            if(m.drivers.every(d=>d.matchTimes && d.matchTimes[roundName] != null)){
                 const winner = m.drivers.reduce((a,b)=> a.matchTimes[roundName] < b.matchTimes[roundName] ? a : b);
                 m.winner = winner.id;
             }
+            
             updateKnockoutBracket();
             saveState();
         }
@@ -935,8 +979,8 @@
                 const drivers = (appState.groups[group]||[]).slice();
                 drivers.forEach(d=>{ const main = findDriverById(d.id); if(main){ d.final = main.finalGroupTime ?? ((d.groupTime1!=null && d.groupTime2!=null)? (d.groupTime1+d.groupTime2)/2 : null) } });
                 drivers.sort((a,b)=> (a.final??9999) - (b.final??9999));
-                const podium = drivers.slice(0,3).map((d,i)=>`<div class="podium-item podium-${i+1}"><div style="font-size:1.2em">${i===0?'🥇':i===1?'🥈':'🥉'}</div><div style="font-weight:700">${escapeHtml(d.name)}</div><div>${d.final? d.final.toFixed(2)+'s':'—'}</div></div>`).join('');
-                const rest = drivers.slice(3).map(d=>`<div class="driver-item" style="margin:6px 0"><span>${escapeHtml(d.name)}</span><span>${d.final? d.final.toFixed(2)+'s':'—'}</span></div>`).join('');
+                const podium = drivers.slice(0,3).map((d,i)=>`<div class="podium-item podium-${i+1}"><div style="font-size:1.2em">${i===0?'🥇':i===1?'🥈':'🥉'}</div><div style="font-weight:700">${escapeHtml(d.name)}</div><div>${d.final? secondsToTimeFormat(d.final):'—'}</div></div>`).join('');
+                const rest = drivers.slice(3).map(d=>`<div class="driver-item" style="margin:6px 0"><span>${escapeHtml(d.name)}</span><span>${d.final? secondsToTimeFormat(d.final):'—'}</span></div>`).join('');
                 return `<div class="card"><h3>Grupa ${group} - ${groupName} <span class="group-badge group-${group}">${group}</span></h3><div class="podium">${podium}</div>${rest?`<div style="margin-top:10px"><h4>Pozostali:</h4>${rest}</div>`:''}</div>`
             }).join('');
         }
